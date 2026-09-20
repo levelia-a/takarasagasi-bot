@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from commands.treasure import TreasureCommands
 from consts.treasure import DEFAULT_SETTINGS
@@ -65,7 +65,9 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_exploration_button_calls_service_and_clears_completed_view(self):
         settings = AsyncMock()
         settings.get_all.return_value = DEFAULT_SETTINGS | {"beginner_max": 1}
-        service = TreasureService(settings, AsyncMock(), lambda low, high: 1)
+        db = MagicMock()
+        db.get_connection.return_value.__aenter__.return_value = MagicMock()
+        service = TreasureService(db, settings, AsyncMock(), lambda low, high: 1)
         session = await service.create(1, "テスト", "beginner")
         view = ExplorationView(service, session)
         event = interaction()

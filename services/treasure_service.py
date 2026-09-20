@@ -39,8 +39,9 @@ class Exploration:
 
 
 class TreasureService:
-    def __init__(self, settings_repository, result_repository, randint=None):
-        self.settings = settings_repository
+    def __init__(self, db, settings_service, result_repository, randint=None):
+        self.db = db
+        self.settings = settings_service
         self.results = result_repository
         self.randint = randint or random.randint
 
@@ -65,7 +66,7 @@ class TreasureService:
         async with session.lock:
             if session.result is not None:
                 # 保存直前に通信が途切れた場合も、同じ結果を再試行できる。
-                await self.results.save(session)
+                await self.save_result(session)
                 return session
             session.exploration_count += 1
             success = session.test_mode == "always_success" or (
@@ -80,12 +81,34 @@ class TreasureService:
                 session.reward = 0
                 session.result = "failure"
             if session.result is not None:
-                await self.results.save(session)
+                await self.save_result(session)
             return session
 
     async def retreat(self, session):
         async with session.lock:
             if session.result is None:
                 session.result = "retreat"
-            await self.results.save(session)
+            await self.save_result(session)
             return session
+
+    async def save_result(self, session):
+        result = {
+            "session_id": session.id,
+            "user_id": session.user_id,
+            "user_name": session.user_name,
+            "difficulty": session.difficulty_name,
+            "start_price": session.price,
+            "success_count": session.success_count,
+            "final_reward": session.reward,
+            "result": session.result,
+            "failure_point": session.exploration_count
+            if session.result == "failure"
+            else None,
+            "is_test": session.is_test,
+        }
+        # 単一INSERTなのでautocommitで保存する。
+        async with (
+            self.db.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await self.results.save(cursor, result)

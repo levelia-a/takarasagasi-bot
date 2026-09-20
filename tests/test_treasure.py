@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from consts.treasure import DEFAULT_SETTINGS
 from services.settings_service import SettingsService
@@ -13,9 +13,19 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.settings = AsyncMock()
         self.settings.get_all.side_effect = lambda: self.values.copy()
         self.results = AsyncMock()
+        self.db = MagicMock()
+        self.connection = (
+            self.db.get_connection.return_value.__aenter__.return_value
+        ) = MagicMock()
+        self.cursor = self.connection.cursor.return_value.__aenter__.return_value = (
+            AsyncMock()
+        )
+        self.connection.begin = AsyncMock()
+        self.connection.commit = AsyncMock()
+        self.connection.rollback = AsyncMock()
         self.roll = 1
         self.service = TreasureService(
-            self.settings, self.results, lambda low, high: self.roll
+            self.db, self.settings, self.results, lambda low, high: self.roll
         )
 
     async def create(self):
@@ -30,7 +40,12 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         await self.service.retreat(session)
         self.assertEqual(session.result, "retreat")
         self.assertEqual(session.success_count, 2)
-        self.results.save.assert_awaited_once_with(session)
+        self.results.save.assert_awaited_once()
+        cursor, record = self.results.save.call_args.args
+        self.assertIs(cursor, self.cursor)
+        self.assertEqual(record["final_reward"], 4000)
+        self.assertEqual(record["result"], "retreat")
+        self.connection.begin.assert_not_awaited()
 
     async def test_failure_loses_all_reward(self):
         session = await self.create()
@@ -106,7 +121,10 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_invalid_settings_do_not_write(self):
-        service = SettingsService(self.settings)
+        repository = AsyncMock()
+        repository.get_all_for_update.return_value = []
+        logs = AsyncMock()
+        service = SettingsService(self.db, repository, logs)
         for values in (
             {"beginner_rate": 101},
             {"beginner_price": -1},
@@ -117,4 +135,37 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 await service.update(values, 123, "admin", "test")
-        self.settings.update_with_log.assert_not_awaited()
+        repository.upsert.assert_not_awaited()
+        logs.insert.assert_not_awaited()
+        self.connection.commit.assert_not_awaited()
+        self.assertEqual(self.connection.rollback.await_count, 6)
+
+    async def test_settings_read_applies_defaults_and_types_without_transaction(self):
+        repository = AsyncMock()
+        repository.get_all.return_value = [
+            {"key": "beginner_price", "value": "42"},
+            {"key": "test_mode", "value": "always_fail"},
+            {"key": "unknown_key", "value": "ignored"},
+        ]
+        service = SettingsService(self.db, repository, AsyncMock())
+        settings = await service.get_all()
+        self.assertEqual(settings["beginner_price"], 42)
+        self.assertEqual(settings["intermediate_price"], 5000)
+        self.assertEqual(settings["test_mode"], "always_fail")
+        self.assertNotIn("unknown_key", settings)
+        self.assertEqual(DEFAULT_SETTINGS["beginner_price"], 1000)
+        repository.get_all.assert_awaited_once_with(self.cursor)
+        self.connection.begin.assert_not_awaited()
+        self.connection.commit.assert_not_awaited()
+
+    async def test_settings_update_and_log_share_cursor_and_commit(self):
+        repository = AsyncMock()
+        repository.get_all_for_update.return_value = []
+        logs = AsyncMock()
+        service = SettingsService(self.db, repository, logs)
+        await service.update({"beginner_price": 123}, 1, "admin", "価格変更")
+        repository.upsert.assert_awaited_once_with(self.cursor, "beginner_price", "123")
+        self.assertIs(logs.insert.call_args.args[0], self.cursor)
+        self.connection.begin.assert_awaited_once()
+        self.connection.commit.assert_awaited_once()
+        self.connection.rollback.assert_not_awaited()

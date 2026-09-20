@@ -1,4 +1,4 @@
-"""レポジトリが使うMySQL接続プールとトランザクションの管理。"""
+"""MySQL接続プールの管理。トランザクションの範囲は呼び出し側で決める。"""
 
 from contextlib import asynccontextmanager
 
@@ -7,7 +7,7 @@ import aiomysql
 from config import DatabaseConfig
 
 
-class Database:
+class DbService:
     def __init__(self, config: DatabaseConfig):
         self.config = config
         self.pool = None
@@ -20,7 +20,8 @@ class Database:
             password=self.config.password,
             db=self.config.database,
             charset="utf8mb4",
-            autocommit=False,
+            autocommit=True,
+            cursorclass=aiomysql.DictCursor,
             minsize=1,
             maxsize=5,
             connect_timeout=10,
@@ -29,18 +30,11 @@ class Database:
         )
 
     @asynccontextmanager
-    async def transaction(self):
+    async def get_connection(self):
         if self.pool is None:
             raise RuntimeError("MySQLに接続していません。")
         async with self.pool.acquire() as connection:
-            await connection.begin()
-            try:
-                async with connection.cursor(aiomysql.DictCursor) as cursor:
-                    yield cursor
-                await connection.commit()
-            except BaseException:
-                await connection.rollback()
-                raise
+            yield connection
 
     async def close(self):
         if self.pool is not None:

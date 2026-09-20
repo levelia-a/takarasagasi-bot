@@ -11,13 +11,19 @@ config.py           環境変数と接続設定
 consts/             難易度・初期設定・Discord ID
 commands/           /takara・/takara_admin
 views/              ボタン・モーダル・Discordへの表示
-services/           抽選・報酬計算・管理設定の検証
-repositories/       MySQL接続・読み書き（SQL）
+services/           業務処理・トランザクション管理
+services/db_service.py  MySQL接続プール・接続の取得と解放
+repositories/       渡されたカーソルでSQLを実行
 database/tables.py   手動実行用のテーブル定義SQL
 tests/              ゲームルール・MySQL結合テスト
 ```
 
 依存方向は `commands/views → services → repositories` です。
+`DbService` は接続プールと接続の取得・解放を管理します。
+各サービスが接続を取得し、設定更新＋管理ログ保存などの処理単位で
+`begin / commit / rollback` を実行します。レポジトリは同じ接続のカーソルを受け取り、SQLを実行して結果を返します。
+初期設定の補完・型変換・結果の組み立てはサービスの役割です。
+単独の読み取りや単一INSERTはautocommitを使い、明示的なトランザクションを開始しません。
 `bot.py` は以前の起動コマンドとの互換用です。
 各ディレクトリは `__init__.py` を置かない暗黙の名前空間パッケージとして扱います。
 この仕組みはPython 3.3以降で利用できますが、このBotの動作要件はPython 3.12以上です。

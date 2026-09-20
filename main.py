@@ -9,10 +9,10 @@ from discord.ext import commands
 from commands.treasure import TreasureCommands
 from config import Config
 from repositories.admin_log_repository import AdminLogRepository
-from repositories.connection import Database
 from repositories.result_repository import ResultRepository
 from repositories.settings_repository import SettingsRepository
 from services.admin_service import AdminService
+from services.db_service import DbService
 from services.settings_service import SettingsService, validate_settings
 from services.treasure_service import TreasureService
 from views.common import report_error
@@ -30,16 +30,17 @@ class TreasureBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions.none(),
         )
         self.config = config
-        self.database = Database(config.database)
-        settings_repository = SettingsRepository(self.database)
-        results = ResultRepository(self.database)
-        self.settings = SettingsService(settings_repository)
-        self.treasure = TreasureService(settings_repository, results)
-        self.admin = AdminService(results, AdminLogRepository(self.database))
+        self.db = DbService(config.database)
+        settings_repository = SettingsRepository()
+        results = ResultRepository()
+        logs = AdminLogRepository()
+        self.settings = SettingsService(self.db, settings_repository, logs)
+        self.treasure = TreasureService(self.db, self.settings, results)
+        self.admin = AdminService(self.db, results, logs)
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self):
-        await self.database.connect()
+        await self.db.connect()
         validate_settings(await self.settings.get_all())
         await self.add_cog(TreasureCommands(self.treasure, self.settings, self.admin))
         self.add_view(TreasureView(self.treasure))
@@ -58,7 +59,7 @@ class TreasureBot(commands.Bot):
         try:
             await super().close()
         finally:
-            await self.database.close()
+            await self.db.close()
 
 
 async def run():
