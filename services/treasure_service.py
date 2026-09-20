@@ -31,21 +31,25 @@ class Exploration:
 
     @property
     def difficulty_name(self):
+        """探索の難易度に対応する日本語名を返す。"""
         return DIFFICULTIES[self.difficulty]["name"]
 
     @property
     def is_test(self):
+        """通常確率以外のテストモードで開始した探索かを返す。"""
         return self.test_mode != "normal"
 
 
 class TreasureService:
     def __init__(self, db, settings_service, result_repository, randint=None):
+        """宝探しで使用するDB・サービス・レポジトリ・抽選関数を保持する。"""
         self.db = db
         self.settings = settings_service
         self.results = result_repository
         self.randint = randint or random.randint
 
     async def create(self, user_id, user_name, difficulty):
+        """運営状態と設定を確認し、開始時の設定を固定した探索を作る。"""
         if difficulty not in DIFFICULTIES:
             raise ValueError("不明な難易度です。")
         settings = await self.settings.get_all()
@@ -63,6 +67,7 @@ class TreasureService:
         )
 
     async def explore(self, session):
+        """探索を1回進め、報酬を計算し、終了した場合は結果を保存する。"""
         async with session.lock:
             if session.result is not None:
                 # 保存直前に通信が途切れた場合も、同じ結果を再試行できる。
@@ -85,6 +90,7 @@ class TreasureService:
             return session
 
     async def retreat(self, session):
+        """引き返して現在の報酬を確定し、結果を保存する。"""
         async with session.lock:
             if session.result is None:
                 session.result = "retreat"
@@ -92,6 +98,7 @@ class TreasureService:
             return session
 
     async def save_result(self, session):
+        """探索結果をDB保存用に整形し、セッション単位で重複なく保存する。"""
         result = {
             "session_id": session.id,
             "user_id": session.user_id,

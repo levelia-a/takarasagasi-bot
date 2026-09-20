@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 async def require_admin(interaction):
+    """管理者権限を確認し、権限がなければエラーを返信する。"""
     if (
         interaction.guild is None
         or not interaction.user.guild_permissions.administrator
@@ -18,6 +19,7 @@ async def require_admin(interaction):
 
 
 async def report_error(interaction, error):
+    """例外をログに記録し、利用者にエラーメッセージを返信する。"""
     logger.error(
         "Discord操作の処理に失敗: guild=%s user=%s",
         interaction.guild_id,
@@ -33,19 +35,23 @@ async def report_error(interaction, error):
 
 class BaseView(discord.ui.View):
     async def on_error(self, interaction, error, item):
+        """ボタンなどの操作中に発生した例外を共通処理に渡す。"""
         await report_error(interaction, error)
 
 
 class AdminOnlyView(BaseView):
     async def interaction_check(self, interaction):
+        """管理者だけにViewの操作を許可する。"""
         return await require_admin(interaction)
 
 
 class AdminOnlyModal(discord.ui.Modal):
     async def interaction_check(self, interaction):
+        """管理者だけにモーダルの送信を許可する。"""
         return await require_admin(interaction)
 
     async def on_error(self, interaction, error):
+        """モーダル処理中に発生した例外を共通処理に渡す。"""
         await report_error(interaction, error)
 
 

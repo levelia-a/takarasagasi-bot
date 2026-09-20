@@ -4,6 +4,7 @@ from consts.treasure import DIFFICULTIES, RESULT_NAMES, TEST_MODES
 
 
 def treasure_panel(settings):
+    """難易度ごとの価格・成功率・探索回数を載せたEmbedを作る。"""
     embed = discord.Embed(
         title="🗺️ 宝探し",
         color=discord.Color.gold(),
@@ -26,6 +27,7 @@ def treasure_panel(settings):
 
 
 def exploration_text(session):
+    """探索の進行状態や終了結果に応じたメッセージを作る。"""
     if session.result == "failure":
         return f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n報酬はすべて失われます。\n\n💰 最終報酬：**0 LIA**"
     title = {
@@ -44,6 +46,7 @@ def exploration_text(session):
 
 
 def settings_text(settings):
+    """現在の運営状態と難易度別設定を表示用の文章にする。"""
     text = (
         f"⚙️ **宝探し現在設定**\n\n運営状態：{'🟢 ON' if settings['operation'] else '🔴 OFF'}\n"
         f"テストモード：{TEST_MODES[settings['test_mode']]}\n\n"
@@ -59,6 +62,7 @@ def settings_text(settings):
 
 
 def statistics_text(summary):
+    """通常プレイの集計結果を表示用の文章にする。"""
     text = f"📊 **宝探し統計**\n\n総プレイ数：**{summary['total']:,}回**\n\n"
     for difficulty in DIFFICULTIES.values():
         text += f"{difficulty['emoji']} {difficulty['name']}：{summary['difficulties'].get(difficulty['name'], 0):,}回\n"
@@ -70,6 +74,7 @@ def statistics_text(summary):
 
 
 def history_entries(rows):
+    """宝探し履歴を、送信時に分割できる文章の一覧にする。"""
     entries = ["📜 **宝探し最新10件**\n\n"]
     for row in rows:
         entries.append(
@@ -82,6 +87,7 @@ def history_entries(rows):
 
 
 def log_entries(rows):
+    """管理者操作ログを、送信時に分割できる文章の一覧にする。"""
     entries = ["🔐 **管理者変更ログ 最新10件**\n\n"]
     for row in rows:
         entries.append(

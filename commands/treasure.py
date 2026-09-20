@@ -10,6 +10,7 @@ from views.treasure import TreasureView
 
 class TreasureCommands(commands.Cog):
     def __init__(self, treasure, settings, admin):
+        """コマンドが使用する宝探し・設定・管理サービスを保持する。"""
         self.treasure = treasure
         self.settings = settings
         self.admin = admin
@@ -17,6 +18,7 @@ class TreasureCommands(commands.Cog):
     @app_commands.command(name="takara", description="宝探しパネルを表示します")
     @app_commands.guild_only()
     async def takara(self, interaction: discord.Interaction):
+        """宝探しを開始する公開パネルを表示する。"""
         await interaction.response.defer()
         settings = await self.settings.get_all()
         await interaction.edit_original_response(
@@ -29,6 +31,7 @@ class TreasureCommands(commands.Cog):
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     async def takara_admin(self, interaction: discord.Interaction):
+        """管理者本人にだけ管理パネルを表示する。"""
         if not await require_admin(interaction):
             return
         embed = discord.Embed(

@@ -7,6 +7,7 @@ from views.messages import history_entries, log_entries, settings_text, statisti
 
 class SettingsModal(AdminOnlyModal):
     def __init__(self, settings, kind):
+        """指定した設定項目を難易度別に入力するモーダルを作る。"""
         titles = {
             "price": "💰 宝探し価格設定",
             "rate": "🎯 成功率設定",
@@ -24,6 +25,7 @@ class SettingsModal(AdminOnlyModal):
             self.add_item(field)
 
     async def on_submit(self, interaction):
+        """入力値を検証して設定を保存し、変更結果を表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             values = {
@@ -46,10 +48,12 @@ class SettingsModal(AdminOnlyModal):
 
 class TestModeView(AdminOnlyView):
     def __init__(self, settings):
+        """テストモードを選ぶボタンを初期化する。"""
         super().__init__(timeout=120)
         self.settings = settings
 
     async def change(self, interaction, mode):
+        """テストモードを変更し、選択画面を閉じる。"""
         await interaction.response.defer()
         await self.settings.update(
             {"test_mode": mode},
@@ -66,24 +70,29 @@ class TestModeView(AdminOnlyView):
         label="通常確率", emoji="🎲", style=discord.ButtonStyle.secondary
     )
     async def normal(self, interaction, button):
+        """通常確率で抽選するモードに切り替える。"""
         await self.change(interaction, "normal")
 
     @discord.ui.button(label="必ず成功", emoji="✅", style=discord.ButtonStyle.success)
     async def success(self, interaction, button):
+        """探索が必ず成功するテストモードに切り替える。"""
         await self.change(interaction, "always_success")
 
     @discord.ui.button(label="必ず失敗", emoji="❌", style=discord.ButtonStyle.danger)
     async def failure(self, interaction, button):
+        """探索が必ず失敗するテストモードに切り替える。"""
         await self.change(interaction, "always_fail")
 
 
 class DeleteTestView(AdminOnlyView):
     def __init__(self, admin):
+        """テスト履歴の削除確認ボタンを初期化する。"""
         super().__init__(timeout=120)
         self.admin = admin
 
     @discord.ui.button(label="削除する", emoji="🗑️", style=discord.ButtonStyle.danger)
     async def delete(self, interaction, button):
+        """テスト履歴を削除し、削除件数を表示する。"""
         await interaction.response.defer()
         deleted = await self.admin.delete_test(
             interaction.user.id, str(interaction.user)
@@ -97,6 +106,7 @@ class DeleteTestView(AdminOnlyView):
         label="キャンセル", emoji="↩️", style=discord.ButtonStyle.secondary
     )
     async def cancel(self, interaction, button):
+        """テスト履歴の削除を取り消し、確認画面を閉じる。"""
         await interaction.response.edit_message(
             content="キャンセルしました。", view=None
         )
@@ -105,6 +115,7 @@ class DeleteTestView(AdminOnlyView):
 
 class AdminView(AdminOnlyView):
     def __init__(self, settings, admin):
+        """設定変更や履歴確認に使う管理パネルを初期化する。"""
         super().__init__(timeout=300)
         self.settings = settings
         self.admin = admin
@@ -113,6 +124,7 @@ class AdminView(AdminOnlyView):
         label="現在の設定", emoji="⚙️", style=discord.ButtonStyle.secondary, row=0
     )
     async def settings_button(self, interaction, button):
+        """現在の設定を管理者本人に表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.edit_original_response(
             content=settings_text(await self.settings.get_all())
@@ -122,24 +134,28 @@ class AdminView(AdminOnlyView):
         label="価格設定", emoji="💰", style=discord.ButtonStyle.primary, row=0
     )
     async def price_button(self, interaction, button):
+        """価格設定の入力モーダルを開く。"""
         await interaction.response.send_modal(SettingsModal(self.settings, "price"))
 
     @discord.ui.button(
         label="成功率設定", emoji="🎯", style=discord.ButtonStyle.primary, row=0
     )
     async def rate_button(self, interaction, button):
+        """成功率設定の入力モーダルを開く。"""
         await interaction.response.send_modal(SettingsModal(self.settings, "rate"))
 
     @discord.ui.button(
         label="探索回数設定", emoji="🔎", style=discord.ButtonStyle.primary, row=1
     )
     async def max_button(self, interaction, button):
+        """最大探索回数の入力モーダルを開く。"""
         await interaction.response.send_modal(SettingsModal(self.settings, "max"))
 
     @discord.ui.button(
         label="ON / OFF", emoji="🔄", style=discord.ButtonStyle.success, row=1
     )
     async def operation_button(self, interaction, button):
+        """運営状態のON・OFFを切り替え、結果を表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         value = await self.settings.toggle_operation(
             interaction.user.id, str(interaction.user)
@@ -152,6 +168,7 @@ class AdminView(AdminOnlyView):
         label="テストモード", emoji="🧪", style=discord.ButtonStyle.secondary, row=1
     )
     async def test_button(self, interaction, button):
+        """テストモードの選択画面を表示する。"""
         await interaction.response.send_message(
             "🧪 テストモードを選択してください。",
             view=TestModeView(self.settings),
@@ -162,6 +179,7 @@ class AdminView(AdminOnlyView):
         label="統計", emoji="📊", style=discord.ButtonStyle.secondary, row=2
     )
     async def stats_button(self, interaction, button):
+        """テスト結果を除いた宝探しの統計を表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.edit_original_response(
             content=statistics_text(await self.admin.statistics())
@@ -171,6 +189,7 @@ class AdminView(AdminOnlyView):
         label="履歴", emoji="📜", style=discord.ButtonStyle.secondary, row=2
     )
     async def history_button(self, interaction, button):
+        """最新の宝探し履歴を文字数制限に合わせて表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await send_pages(interaction, history_entries(await self.admin.history()))
 
@@ -178,6 +197,7 @@ class AdminView(AdminOnlyView):
         label="テストデータ削除", emoji="🧹", style=discord.ButtonStyle.danger, row=3
     )
     async def delete_test_button(self, interaction, button):
+        """テスト履歴の削除確認画面を表示する。"""
         await interaction.response.send_message(
             "⚠️ テストデータを削除しますか？",
             view=DeleteTestView(self.admin),
@@ -188,5 +208,6 @@ class AdminView(AdminOnlyView):
         label="管理ログ", emoji="🔐", style=discord.ButtonStyle.secondary, row=3
     )
     async def logs_button(self, interaction, button):
+        """最新の管理者操作ログを文字数制限に合わせて表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await send_pages(interaction, log_entries(await self.admin.admin_logs()))

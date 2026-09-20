@@ -10,6 +10,7 @@ from views.messages import exploration_text
 
 class ExplorationView(BaseView):
     def __init__(self, service, session):
+        """進行中の探索と操作ボタンを初期化する。"""
         super().__init__(timeout=300)
         self.service = service
         self.session = session
@@ -17,6 +18,7 @@ class ExplorationView(BaseView):
         self.message = None
 
     async def interaction_check(self, interaction):
+        """探索を開始した本人だけにボタン操作を許可する。"""
         if interaction.user.id != self.session.user_id:
             await interaction.response.send_message(
                 "❌ この宝探しはあなたのものではありません。", ephemeral=True
@@ -25,6 +27,7 @@ class ExplorationView(BaseView):
         return True
 
     async def act(self, interaction, deeper):
+        """連打を防ぎながら探索または撤退を実行し、画面を更新する。"""
         if self.busy:
             await interaction.response.send_message(
                 "⏳ 処理中です。少しお待ちください。", ephemeral=True
@@ -59,6 +62,7 @@ class ExplorationView(BaseView):
         custom_id="takara_deeper",
     )
     async def deeper(self, interaction, button):
+        """さらに奥へ進むボタンのクリックを処理する。"""
         await self.act(interaction, True)
 
     @discord.ui.button(
@@ -68,9 +72,11 @@ class ExplorationView(BaseView):
         custom_id="takara_retreat",
     )
     async def retreat(self, interaction, button):
+        """引き返すボタンのクリックを処理する。"""
         await self.act(interaction, False)
 
     async def on_timeout(self):
+        """操作期限が切れた画面からボタンを取り除く。"""
         if self.message is not None:
             try:
                 await self.message.edit(
@@ -83,10 +89,12 @@ class ExplorationView(BaseView):
 
 class TreasureView(BaseView):
     def __init__(self, service):
+        """再起動後も使用する宝探しの入口パネルを初期化する。"""
         super().__init__(timeout=None)
         self.service = service
 
     async def start(self, interaction, difficulty):
+        """選択した難易度の探索を開始し、最初の結果を本人に表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             session = await self.service.create(
@@ -119,6 +127,7 @@ class TreasureView(BaseView):
         custom_id="takara_beginner",
     )
     async def beginner(self, interaction, button):
+        """初級宝探しボタンから探索を開始する。"""
         await self.start(interaction, "beginner")
 
     @discord.ui.button(
@@ -128,6 +137,7 @@ class TreasureView(BaseView):
         custom_id="takara_intermediate",
     )
     async def intermediate(self, interaction, button):
+        """中級宝探しボタンから探索を開始する。"""
         await self.start(interaction, "intermediate")
 
     @discord.ui.button(
@@ -137,4 +147,5 @@ class TreasureView(BaseView):
         custom_id="takara_advanced",
     )
     async def advanced(self, interaction, button):
+        """上級宝探しボタンから探索を開始する。"""
         await self.start(interaction, "advanced")

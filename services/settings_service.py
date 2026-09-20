@@ -4,6 +4,7 @@ from consts.treasure import DEFAULT_SETTINGS, DIFFICULTIES, MAX_REWARD, TEST_MOD
 
 
 def validate_settings(settings):
+    """設定値の範囲を検証し、不正な場合はValueErrorを送出する。"""
     if settings["test_mode"] not in TEST_MODES:
         raise ValueError("不明なテストモードです。")
     if settings["operation"] not in (0, 1):
@@ -26,6 +27,7 @@ def validate_settings(settings):
 
 class SettingsService:
     def __init__(self, db, repository, logs):
+        """DB・レポジトリと設定変更を直列化するロックを保持する。"""
         self.db = db
         self.repository = repository
         self.logs = logs
@@ -33,6 +35,7 @@ class SettingsService:
 
     @staticmethod
     def build_settings(rows):
+        """設定行の型を変換し、未登録項目を初期値で補完する。"""
         settings = DEFAULT_SETTINGS.copy()
         for row in rows:
             key, value = row["key"], row["value"]
@@ -41,6 +44,7 @@ class SettingsService:
         return settings
 
     async def get_all(self):
+        """DBの設定を取得し、初期値で補完した設定辞書を返す。"""
         async with (
             self.db.get_connection() as connection,
             connection.cursor() as cursor,
@@ -49,6 +53,7 @@ class SettingsService:
         return self.build_settings(rows)
 
     async def update(self, values, admin_id, admin_name, action):
+        """変更値を検証し、設定更新と管理ログ保存をまとめて確定する。"""
         async with self.lock, self.db.get_connection() as connection:
             await connection.begin()
             try:
@@ -75,6 +80,7 @@ class SettingsService:
                 raise
 
     async def toggle_operation(self, admin_id, admin_name):
+        """運営状態と管理ログをまとめて保存し、新しい状態を返す。"""
         async with self.lock, self.db.get_connection() as connection:
             await connection.begin()
             try:

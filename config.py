@@ -20,6 +20,7 @@ class DatabaseConfig:
 
     @classmethod
     def from_env(cls):
+        """環境変数からMySQLの接続設定を読み込み、必須項目を検証する。"""
         load_dotenv(Path(__file__).with_name(".env"))
         url = os.getenv("MYSQL_URL", "")
         if url:
@@ -68,6 +69,7 @@ class Config:
 
     @classmethod
     def from_env(cls):
+        """Botトークン・サーバーID・DB接続設定を読み込む。"""
         database = DatabaseConfig.from_env()
         token = os.getenv("DISCORD_TOKEN", "").strip()
         if not token:

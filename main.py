@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class TreasureBot(commands.Bot):
     def __init__(self, config):
+        """Botと各サービスを初期化する。"""
         super().__init__(
             command_prefix="!",
             intents=discord.Intents.default(),
@@ -40,6 +41,7 @@ class TreasureBot(commands.Bot):
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self):
+        """DB接続を開始し、コマンドと常設パネルを登録する。"""
         await self.db.connect()
         validate_settings(await self.settings.get_all())
         await self.add_cog(TreasureCommands(self.treasure, self.settings, self.admin))
@@ -50,12 +52,15 @@ class TreasureBot(commands.Bot):
         logger.info("コマンド同期成功: guild=%s count=%s", guild.id, len(synced))
 
     async def on_ready(self):
+        """Discordへの接続完了をログに出力する。"""
         logger.info("宝探しBot起動成功: %s", self.user)
 
     async def on_app_command_error(self, interaction, error):
+        """スラッシュコマンドのエラーを記録して利用者に通知する。"""
         await report_error(interaction, error)
 
     async def close(self):
+        """BotとDB接続プールを終了する。"""
         try:
             await super().close()
         finally:
@@ -63,12 +68,14 @@ class TreasureBot(commands.Bot):
 
 
 async def run():
+    """環境変数から設定を読み込み、Botを起動する。"""
     config = Config.from_env()
     async with TreasureBot(config) as bot:
         await bot.start(config.token)
 
 
 def main():
+    """ログを設定し、非同期の起動処理を実行する。"""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
