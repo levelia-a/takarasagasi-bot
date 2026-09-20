@@ -1,0 +1,91 @@
+import discord
+
+from consts.treasure import DIFFICULTIES, RESULT_NAMES, TEST_MODES
+
+
+def treasure_panel(settings):
+    embed = discord.Embed(
+        title="🗺️ 宝探し",
+        color=discord.Color.gold(),
+        description="宝の地図を手に入れて、危険な場所を探索しよう！\n\n"
+        "難易度が高いほど、必要なLIAも大きくなります。\n\n"
+        "✨ 探索に成功すると報酬が2倍！\n"
+        "💥 失敗すると獲得報酬はすべて失われます。\n"
+        "🏠 引き返せば、その時点の報酬を確保できます。",
+    )
+    for key, difficulty in DIFFICULTIES.items():
+        embed.add_field(
+            name=f"{difficulty['emoji']} {difficulty['name']}宝探し",
+            value=f"必要LIA：{settings[f'{key}_price']:,}\n"
+            f"成功率：{settings[f'{key}_rate']}%\n"
+            f"最大探索：{settings[f'{key}_max']}回",
+            inline=False,
+        )
+    embed.set_footer(text="※現在はLIAシステムとは未接続です")
+    return embed
+
+
+def exploration_text(session):
+    if session.result == "failure":
+        return f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n報酬はすべて失われます。\n\n💰 最終報酬：**0 LIA**"
+    title = {
+        "retreat": "🏠 **無事に引き返しました！**",
+        "max_success": "🎉 **最大探索回数到達！**",
+    }.get(session.result, "✨ **探索成功！**\n\n報酬が2倍になりました！")
+    text = (
+        f"{title}\n\n{session.difficulty_name}宝探し\n"
+        f"🔎 探索回数：**{session.exploration_count}/{session.max_exploration}**\n"
+        f"✨ 成功回数：**{session.success_count}回**\n"
+        f"💰 {'獲得報酬' if session.result else '現在の報酬'}：**{session.reward:,} LIA**"
+    )
+    if session.result is None:
+        text += "\n\n⚔️ **さらに奥へ進みますか？**\n失敗すると報酬はすべて失われます。"
+    return text
+
+
+def settings_text(settings):
+    text = (
+        f"⚙️ **宝探し現在設定**\n\n運営状態：{'🟢 ON' if settings['operation'] else '🔴 OFF'}\n"
+        f"テストモード：{TEST_MODES[settings['test_mode']]}\n\n"
+    )
+    for key, difficulty in DIFFICULTIES.items():
+        text += (
+            f"{difficulty['emoji']} **{difficulty['name']}**\n"
+            f"💰 価格：{settings[f'{key}_price']:,} LIA\n"
+            f"🎯 成功率：{settings[f'{key}_rate']}%\n"
+            f"🔎 最大探索：{settings[f'{key}_max']}回\n\n"
+        )
+    return text + "⚠️ 現在はLIAシステムとは未接続です。"
+
+
+def statistics_text(summary):
+    text = f"📊 **宝探し統計**\n\n総プレイ数：**{summary['total']:,}回**\n\n"
+    for difficulty in DIFFICULTIES.values():
+        text += f"{difficulty['emoji']} {difficulty['name']}：{summary['difficulties'].get(difficulty['name'], 0):,}回\n"
+    return (
+        text + f"\n仮想消費LIA：**{summary['consumed']:,} LIA**\n"
+        f"仮想報酬LIA：**{summary['payout']:,} LIA**\n最大仮想報酬：**{summary['max_payout']:,} LIA**\n\n"
+        "※テストデータは除外。実際のLIA残高とは接続していません。"
+    )
+
+
+def history_entries(rows):
+    entries = ["📜 **宝探し最新10件**\n\n"]
+    for row in rows:
+        entries.append(
+            f"**{discord.utils.escape_markdown(row['user_name'])}**{' 🧪' if row['is_test'] else ''}\n"
+            f"{row['difficulty']} / 開始：{row['start_price']:,} LIA\n"
+            f"成功：{row['success_count']}回 / 結果：{RESULT_NAMES.get(row['result'], row['result'])}\n"
+            f"報酬：{row['final_reward']:,} LIA\n{row['created_at']}\n\n"
+        )
+    return entries if rows else entries + ["まだ履歴はありません。"]
+
+
+def log_entries(rows):
+    entries = ["🔐 **管理者変更ログ 最新10件**\n\n"]
+    for row in rows:
+        entries.append(
+            f"👤 {discord.utils.escape_markdown(row['admin_name'])}\n🔧 {row['action']}\n"
+            f"📝 {row['detail']}\n🕐 {row['created_at']}\n\n"
+        )
+    return entries if rows else entries + ["まだログはありません。"]
