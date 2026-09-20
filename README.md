@@ -61,13 +61,14 @@ cp .env.example .env
 | 変数 | 内容 |
 | --- | --- |
 | `DISCORD_TOKEN` | Botトークン（必須） |
-| `DISCORD_GUILD_ID` | コマンドを登録するサーバー。省略時は `consts/discord.py` の値 |
+| `GUILD_ID` | コマンドを登録するサーバー。省略時は `consts/discord.py` の値 |
 | `MYSQL_URL` | `mysql://user:password@host:port/database`。指定時は個別設定より優先 |
-| `MYSQL_HOST` / `MYSQL_PORT` | MySQL接続先。ポートの既定値は3306 |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | MySQL認証情報 |
+| `MYSQLHOST` / `MYSQLPORT` | MySQL接続先。ポートの既定値は3306 |
+| `MYSQLUSER` / `MYSQLPASSWORD` | MySQL認証情報 |
 | `MYSQL_DATABASE` | 専用のデータベース名 |
 
-`MYSQL_URL` を使わない場合、HOST・USER・DATABASEは必須です。
+`MYSQL_URL` を使わない場合、`MYSQLHOST`・`MYSQLUSER`・`MYSQL_DATABASE` は必須です。
+従来の `DISCORD_GUILD_ID`・`MYSQL_HOST`・`MYSQL_PORT`・`MYSQL_USER`・`MYSQL_PASSWORD` も使用できますが、個別設定では上表の名前を優先します。
 URLのユーザー名やパスワードに記号がある場合はパーセントエンコードしてください。
 SSLなどのURLクエリ指定には対応していません。TLS必須の接続先は接続設定の追加が必要です。
 
@@ -121,7 +122,8 @@ TAKARA_TEST_MYSQL_URL='mysql://user:password@127.0.0.1:3306/takara_test' \
 ## Railway
 
 Pythonサービスと、このBot専用のMySQLサービス／DBを用意します。
-Bot側に `DISCORD_TOKEN`、必要に応じて `DISCORD_GUILD_ID`、MySQLの `MYSQL_URL` 参照を設定します。
+Bot側に `DISCORD_TOKEN`、`GUILD_ID`、`MYSQLHOST`・`MYSQLPORT`・`MYSQLUSER`・`MYSQLPASSWORD`・`MYSQL_DATABASE` の参照を設定します。
+`GUILD_ID` は省略可能です。MySQL接続には個別設定の代わりに `MYSQL_URL` も使用できます（指定時は優先）。
 `railway.json` の起動コマンドは `python -X pycache_prefix=.cache/pycache main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
 デプロイ前に `database/tables.py` のSQLでテーブルを手動作成してください。

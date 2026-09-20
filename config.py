@@ -45,19 +45,29 @@ class DatabaseConfig:
                 unquote(parsed.password or ""),
                 unquote(parsed.path.lstrip("/")),
             )
-        names = ("MYSQL_HOST", "MYSQL_USER", "MYSQL_DATABASE")
-        missing = [name for name in names if not os.getenv(name)]
+        host = os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST")
+        user = os.getenv("MYSQLUSER") or os.getenv("MYSQL_USER")
+        database = os.getenv("MYSQL_DATABASE")
+        missing = [
+            name
+            for name, value in (
+                ("MYSQLHOST", host),
+                ("MYSQLUSER", user),
+                ("MYSQL_DATABASE", database),
+            )
+            if not value
+        ]
         if missing:
             raise ValueError("必須環境変数が未設定です: " + ", ".join(missing))
-        port = int(os.getenv("MYSQL_PORT", "3306"))
+        port = int(os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT", "3306"))
         if not 1 <= port <= 65535:
-            raise ValueError("MYSQL_PORT は1〜65535で指定してください。")
+            raise ValueError("MYSQLPORT は1〜65535で指定してください。")
         return cls(
-            os.environ["MYSQL_HOST"],
+            host,
             port,
-            os.environ["MYSQL_USER"],
-            os.getenv("MYSQL_PASSWORD", ""),
-            os.environ["MYSQL_DATABASE"],
+            user,
+            os.getenv("MYSQLPASSWORD", os.getenv("MYSQL_PASSWORD", "")),
+            database,
         )
 
 
@@ -74,7 +84,9 @@ class Config:
         token = os.getenv("DISCORD_TOKEN", "").strip()
         if not token:
             raise ValueError("DISCORD_TOKEN が未設定です。")
-        guild_id = int(os.getenv("DISCORD_GUILD_ID") or DEFAULT_GUILD_ID)
+        guild_id = int(
+            os.getenv("GUILD_ID") or os.getenv("DISCORD_GUILD_ID") or DEFAULT_GUILD_ID
+        )
         if guild_id <= 0:
-            raise ValueError("DISCORD_GUILD_ID は正の整数で指定してください。")
+            raise ValueError("GUILD_ID は正の整数で指定してください。")
         return cls(token, guild_id, database)
