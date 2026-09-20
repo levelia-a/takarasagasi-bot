@@ -52,8 +52,17 @@ URLのユーザー名やパスワードに記号がある場合はパーセン�
 SSLなどのURLクエリ指定には対応していません。TLS必須の接続先は接続設定の追加が必要です。
 
 ```sh
-python main.py
+python -X pycache_prefix=.cache/pycache main.py
 ```
+
+`-X pycache_prefix=.cache/pycache` により、キャッシュをプロジェクト直下の
+`.cache/pycache/` にまとめます。内部には元のパスに対応した階層が作られますが、
+各ソースフォルダーには `__pycache__` を作りません。`.cache/` はGit管理対象外です。
+このオプションを付けずにPythonを実行すると、通常の `__pycache__` が再び作られます。
+同じターミナルで常に集約したい場合は、プロジェクトのルートで
+`export PYTHONPYCACHEPREFIX="$PWD/.cache/pycache"` を実行すれば、`python main.py` でも同じ保存先になります。
+設定はPython起動前に必要なため、Botが読み込む `.env` には記載しません。
+参照: [Pythonのキャッシュ保存先設定](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPYCACHEPREFIX)。
 
 起動時はMySQLへ接続し、既存の設定を読み込みます。テーブル作成・変更・データ移行は行いません。
 `settings` は空の状態でも使用できます。未登録項目は `consts/treasure.py` の初期値を使い、管理画面で変更した項目をDBに保存します。
@@ -77,7 +86,7 @@ Botの招待には `bot` と `applications.commands` スコープ、および投
 ## 検証
 
 ```sh
-python -m unittest discover -s tests -v
+python -X pycache_prefix=.cache/pycache -m unittest discover -s tests -v
 ```
 
 MySQL結合テストには、使い捨ての空のDBを指定します。本番DBを指定しないでください。
@@ -86,14 +95,14 @@ MySQL結合テストには、使い捨ての空のDBを指定します。本番D
 
 ```sh
 TAKARA_TEST_MYSQL_URL='mysql://user:password@127.0.0.1:3306/takara_test' \
-  python -m unittest discover -s tests -v
+  python -X pycache_prefix=.cache/pycache -m unittest discover -s tests -v
 ```
 
 ## Railway
 
 Pythonサービスと、このBot専用のMySQLサービス／DBを用意します。
 Bot側に `DISCORD_TOKEN`、必要に応じて `DISCORD_GUILD_ID`、MySQLの `MYSQL_URL` 参照を設定します。
-`railway.json` の起動コマンドは `python main.py` です。HTTPポートは不要です。
+`railway.json` の起動コマンドは `python -X pycache_prefix=.cache/pycache main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
 デプロイ前に `database/tables.py` のSQLでテーブルを手動作成してください。
 コマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
