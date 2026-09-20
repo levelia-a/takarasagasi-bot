@@ -1,4 +1,3 @@
-import copy
 import os
 import unittest
 from unittest.mock import patch
@@ -7,10 +6,9 @@ from pymysql.err import IntegrityError
 
 from config import DatabaseConfig
 from consts.treasure import DEFAULT_SETTINGS
-from database.connection import Database
-from database.schema import initialize_database
+from database.tables import TABLES_SQL
 from repositories.admin_log_repository import AdminLogRepository
-from repositories.migration_repository import MigrationRepository
+from repositories.connection import Database
 from repositories.result_repository import ResultRepository
 from repositories.settings_repository import SettingsRepository
 from services.settings_service import SettingsService
@@ -34,14 +32,18 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
                     "MySQL結合テストには空の専用DBを指定してください。既存テーブルは削除しません。"
                 )
         self.addAsyncCleanup(self.remove_created_tables)
-        await initialize_database(self.database)
+        # テスト用DBにだけ、手動実行と同じSQLでテーブルを用意する。
+        async with self.database.transaction() as cursor:
+            for statement in TABLES_SQL.split(";"):
+                if statement.strip():
+                    await cursor.execute(statement)
         self.settings = SettingsRepository(self.database)
         self.results = ResultRepository(self.database)
         self.logs = AdminLogRepository(self.database)
 
     async def remove_created_tables(self):
         async with self.database.transaction() as cursor:
-            for table in ("data_migrations", "admin_logs", "statistics", "settings"):
+            for table in ("admin_logs", "statistics", "settings"):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -49,7 +51,6 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await settings.update(
             {"beginner_price": 1234}, 1545489116127559681, "管理者🌟", "価格変更"
         )
-        await initialize_database(self.database)
         self.assertEqual((await self.settings.get_all())["beginner_price"], 1234)
         service = TreasureService(self.settings, self.results, lambda low, high: 1)
         session = await service.create(1545489116127559682, "参加者🌟", "beginner")
@@ -80,48 +81,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.settings.get_all())["beginner_price"], 1000)
         self.assertEqual(await self.logs.recent(), ())
 
-    async def test_migration_is_atomic_and_rerunnable(self):
-        payload = {
-            "settings": DEFAULT_SETTINGS | {"beginner_price": 1},
-            "records": [
-                {
-                    "id": 1,
-                    "source_table": "history",
-                    "user_id": 1545489116127559682,
-                    "user_name": "テスト🌟",
-                    "difficulty": "初級",
-                    "start_price": 1000,
-                    "success_count": 2,
-                    "final_reward": 4000,
-                    "result": "retreat",
-                    "failure_point": None,
-                    "is_test": 0,
-                    "created_at": "2026-09-20 15:00:00",
-                }
-            ],
-            "logs": [
-                {
-                    "admin_id": 1,
-                    "admin_name": "admin",
-                    "action": "test",
-                    "detail": "test",
-                    "created_at": "2026-09-20 14:00:00",
-                }
-            ],
-        }
-        repository = MigrationRepository(self.database)
-        invalid = copy.deepcopy(payload)
-        invalid["logs"][0]["admin_id"] = None
-        with self.assertRaises(IntegrityError):
-            await repository.import_source(invalid, "a" * 64)
-        self.assertEqual((await self.settings.get_all())["beginner_price"], 1000)
-        self.assertEqual(len(await self.results.recent()), 0)
-        self.assertTrue(await repository.import_source(payload, "a" * 64))
-        self.assertFalse(await repository.import_source(payload, "a" * 64))
-        self.assertEqual(
-            str((await self.results.recent())[0]["created_at"]), "2026-09-20 15:00:00"
-        )
-        with self.assertRaisesRegex(ValueError, "既存データ"):
-            await repository.import_source(payload, "b" * 64)
-        self.assertEqual(len(await self.results.recent()), 1)
-        self.assertEqual(len(await self.logs.recent()), 1)
+    async def test_empty_settings_use_defaults_without_inserting_rows(self):
+        self.assertEqual(await self.settings.get_all(), DEFAULT_SETTINGS)
+        async with self.database.transaction() as cursor:
+            await cursor.execute("SELECT COUNT(*) AS count FROM settings")
+            self.assertEqual((await cursor.fetchone())["count"], 0)

@@ -1,3 +1,11 @@
+"""RailwayのMySQLターミナルで手動実行するテーブル定義。
+
+TABLES_SQL 内のSQLを、宝探しBot専用のデータベースで実行してください。
+このファイルは定義のみです。Bot起動時にSQLを実行する処理はありません。
+settings の未登録項目には consts/treasure.py の初期値を使用します。
+"""
+
+TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS settings (
     `key` VARCHAR(64) PRIMARY KEY,
     value VARCHAR(255) NOT NULL
@@ -27,9 +35,4 @@ CREATE TABLE IF NOT EXISTS admin_logs (
     detail TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS data_migrations (
-    source_sha256 CHAR(64) PRIMARY KEY,
-    detail TEXT NOT NULL,
-    migrated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""

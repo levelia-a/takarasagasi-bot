@@ -12,18 +12,16 @@ consts/             難易度・初期設定・Discord ID
 commands/           /takara・/takara_admin
 views/              ボタン・モーダル・Discordへの表示
 services/           抽選・報酬計算・管理設定の検証
-repositories/       MySQLへの読み書き（SQL）
-database/           接続プール・テーブル初期化
-src/sql/            新規DB定義・再実行可能な初期マイグレーション
-scripts/            SQLiteからの移行ツール
-tests/              ゲームルール・移行・MySQL結合テスト
+repositories/       MySQL接続・読み書き（SQL）
+database/tables.py   手動実行用のテーブル定義SQL
+tests/              ゲームルール・MySQL結合テスト
 ```
 
-依存方向は `commands/views → services → repositories → database` です。
+依存方向は `commands/views → services → repositories` です。
 `bot.py` は以前の起動コマンドとの互換用です。
 各ディレクトリは `__init__.py` を置かない暗黙の名前空間パッケージとして扱います。
 この仕組みはPython 3.3以降で利用できますが、このBotの動作要件はPython 3.12以上です。
-プロジェクトのルートディレクトリで、以下の起動・移行・テストコマンドを実行してください。
+プロジェクトのルートディレクトリで、以下の起動・テストコマンドを実行してください。
 
 ## セットアップ
 
@@ -34,7 +32,10 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-宝探しBot専用のMySQLデータベースを用意し、`.env` を設定してください。
+宝探しBot専用のMySQLデータベースを用意し、RailwayのMySQLターミナルで
+`database/tables.py` の `TABLES_SQL` 内のSQLを手動実行してください。
+作成するテーブルは `settings`・`statistics`・`admin_logs` の3つです。
+その後、`.env` に接続情報を設定してください。
 他BotのDBには接続しないでください。`settings` など汎用名のテーブルを使用します。
 
 | 変数 | 内容 |
@@ -54,8 +55,10 @@ SSLなどのURLクエリ指定には対応していません。TLS必須の接�
 python main.py
 ```
 
-起動時にMySQLへ接続し、不足テーブルと初期設定を作成します。既存設定は上書きしません。
-DBユーザーには専用DBの `CREATE / SELECT / INSERT / UPDATE / DELETE` 権限が必要です。
+起動時はMySQLへ接続し、既存の設定を読み込みます。テーブル作成・変更・データ移行は行いません。
+`settings` は空の状態でも使用できます。未登録項目は `consts/treasure.py` の初期値を使い、管理画面で変更した項目をDBに保存します。
+Bot用DBユーザーには専用DBの `SELECT / INSERT / UPDATE / DELETE` 権限が必要です。
+テーブルを手動作成するユーザーには別途 `CREATE` 権限が必要です。
 サーバーへのコマンド同期も起動時に行います。定義変更後は再起動してください。
 Botの招待には `bot` と `applications.commands` スコープ、および投稿先でメッセージ送信・埋め込みリンク権限が必要です。
 
@@ -69,28 +72,7 @@ Botの招待には `bot` と `applications.commands` スコープ、および投
 - 探索回数は1〜215、最大報酬は65桁以内です。最大回数1の場合も最初の成功で完走します。
 - 同じゲームの結果は重複保存しません。通常統計からテスト結果を除外します。
 - 操作期限は5分です。途中のゲームはメモリ上だけに保持し、タイムアウト・再起動時は精算も結果保存も行いません。入口パネルは再起動後も使用できます。
-- 時刻はMySQLセッションのJSTで記録します。旧履歴の日時はそのまま移します。
-
-## SQLiteからの移行
-
-旧Botを停止してSQLiteのバックアップを取ってください。元の `takara.db` は移行ツールから変更しません。
-移行先は空の専用DBに限定します。テーブルと初期設定だけ作成済みのDBでも実行できます。
-
-```sh
-# 確認のみ。MySQLには接続しません。
-python -m scripts.migrate_sqlite takara.db --legacy-history-mode test
-
-# .envで指定したMySQLへ書き込む
-python -m scripts.migrate_sqlite takara.db --legacy-history-mode test --apply
-```
-
-`--legacy-history-mode` はテスト判定を持たない旧履歴の分類です。
-通常プレイなら `normal`、テストなら `test` を明示してください。混在する場合は分類を整理してから移行します。
-既に `is_test` がある履歴は元の分類を使います。
-新形式の `settings` を優先し、旧 `settings_old` / `operation` は不足分の補完にだけ使います。
-旧形式の集計専用 `statistics` は移しません。移行した個別履歴から集計し直します。
-新旧両方の個別履歴がある場合や、移行先に別の履歴・管理ログがある場合は停止します。
-同じ内容の再実行はスキップします。移行中のエラーはデータ変更をロールバックします。
+- 時刻はMySQLセッションのJSTで記録します。
 
 ## 検証
 
@@ -99,6 +81,8 @@ python -m unittest discover -s tests -v
 ```
 
 MySQL結合テストには、使い捨ての空のDBを指定します。本番DBを指定しないでください。
+テスト内でのみ `database/tables.py` のSQLを実行し、終了後に作成したテーブルを削除します。
+テスト用DBユーザーには `CREATE / DROP / SELECT / INSERT / UPDATE / DELETE` 権限が必要です。
 
 ```sh
 TAKARA_TEST_MYSQL_URL='mysql://user:password@127.0.0.1:3306/takara_test' \
@@ -111,10 +95,9 @@ Pythonサービスと、このBot専用のMySQLサービス／DBを用意しま�
 Bot側に `DISCORD_TOKEN`、必要に応じて `DISCORD_GUILD_ID`、MySQLの `MYSQL_URL` 参照を設定します。
 `railway.json` の起動コマンドは `python main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
-DB移行とコマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
+デプロイ前に `database/tables.py` のSQLでテーブルを手動作成してください。
+コマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
 
 起動しない場合はRailwayのBuild Logsで依存関係の導入、Deploy Logsで必須変数・MySQL接続・テーブル権限・Discord認証・コマンド同期を確認してください。
-`src/sql/20260920_initialize_mysql.sql` は新規MySQLへの初期移行です。`createTable.sql` と同じ定義で、再実行しても既存データを上書きしません。
-既存の別形式MySQLテーブルを自動修復するものではありません。
 
 実装参照: [discord.py](https://discordpy.readthedocs.io/en/stable/ext/commands/api.html)、[aiomysql](https://github.com/aio-libs/aiomysql)。

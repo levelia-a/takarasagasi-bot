@@ -8,9 +8,8 @@ from discord.ext import commands
 
 from commands.treasure import TreasureCommands
 from config import Config
-from database.connection import Database
-from database.schema import initialize_database
 from repositories.admin_log_repository import AdminLogRepository
+from repositories.connection import Database
 from repositories.result_repository import ResultRepository
 from repositories.settings_repository import SettingsRepository
 from services.admin_service import AdminService
@@ -41,7 +40,6 @@ class TreasureBot(commands.Bot):
 
     async def setup_hook(self):
         await self.database.connect()
-        await initialize_database(self.database)
         validate_settings(await self.settings.get_all())
         await self.add_cog(TreasureCommands(self.treasure, self.settings, self.admin))
         self.add_view(TreasureView(self.treasure))

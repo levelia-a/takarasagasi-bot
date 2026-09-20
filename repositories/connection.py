@@ -1,4 +1,4 @@
-"""MySQL接続プールとトランザクションの管理。"""
+"""レポジトリが使うMySQL接続プールとトランザクションの管理。"""
 
 from contextlib import asynccontextmanager
 
