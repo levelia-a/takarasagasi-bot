@@ -111,4 +111,6 @@ class TreasureService:
             self.db.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            await self.results.save(cursor, result)
+            await self.results.insert_statistics_record_if_session_id_not_exists(
+                cursor, result
+            )

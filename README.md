@@ -24,6 +24,14 @@ tests/              ゲームルール・MySQL結合テスト
 `begin / commit / rollback` を実行します。レポジトリは同じ接続のカーソルを受け取り、SQLを実行して結果を返します。
 初期設定の補完・型変換・結果の組み立てはサービスの役割です。
 単独の読み取りや単一INSERTはautocommitを使い、明示的なトランザクションを開始しません。
+
+レポジトリの関数名は `操作_対象_条件` のsnake_caseで統一します。
+`get`・`insert`・`update`・`upsert`・`delete` を区別し、対象テーブルやデータを名前に含めます。
+条件で絞る場合は `by_user_id` など、集計単位は `grouped_by_difficulty` などで表します。
+固定の取得件数やロックの有無も、`latest_10`・`for_update` として明記します。
+例：`get_all_settings`、`upsert_setting_by_key`、`insert_admin_log`。
+結果保存は既存行を上書きしないため、`insert_statistics_record_if_session_id_not_exists` としています。
+
 `bot.py` は以前の起動コマンドとの互換用です。
 各ディレクトリは `__init__.py` を置かない暗黙の名前空間パッケージとして扱います。
 この仕組みはPython 3.3以降で利用できますが、このBotの動作要件はPython 3.12以上です。

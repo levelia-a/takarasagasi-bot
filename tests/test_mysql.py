@@ -124,6 +124,6 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             connection.cursor() as cursor,
         ):
             self.assertTrue(connection.get_autocommit())
-            rows = await self.settings_repository.get_all(cursor)
+            rows = await self.settings_repository.get_all_settings(cursor)
             self.assertEqual(len(rows), 0)
             self.assertFalse(connection.get_transaction_status())

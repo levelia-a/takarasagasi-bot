@@ -45,7 +45,7 @@ class SettingsService:
             self.db.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            rows = await self.repository.get_all(cursor)
+            rows = await self.repository.get_all_settings(cursor)
         return self.build_settings(rows)
 
     async def update(self, values, admin_id, admin_name, action):
@@ -53,18 +53,22 @@ class SettingsService:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    rows = await self.repository.get_all_for_update(cursor)
+                    rows = await self.repository.get_all_settings_for_update(cursor)
                     settings = self.build_settings(rows)
                     if not values.keys() <= settings.keys():
                         raise ValueError("不明な設定項目です。")
                     settings.update(values)
                     validate_settings(settings)
                     for key, value in values.items():
-                        await self.repository.upsert(cursor, key, str(value))
+                        await self.repository.upsert_setting_by_key(
+                            cursor, key, str(value)
+                        )
                     detail = ", ".join(
                         f"{key}={value}" for key, value in values.items()
                     )
-                    await self.logs.insert(cursor, admin_id, admin_name, action, detail)
+                    await self.logs.insert_admin_log(
+                        cursor, admin_id, admin_name, action, detail
+                    )
                 await connection.commit()
             except BaseException:
                 await connection.rollback()
@@ -75,11 +79,13 @@ class SettingsService:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    rows = await self.repository.get_all_for_update(cursor)
+                    rows = await self.repository.get_all_settings_for_update(cursor)
                     current = self.build_settings(rows)
                     value = 0 if current["operation"] else 1
-                    await self.repository.upsert(cursor, "operation", str(value))
-                    await self.logs.insert(
+                    await self.repository.upsert_setting_by_key(
+                        cursor, "operation", str(value)
+                    )
+                    await self.logs.insert_admin_log(
                         cursor,
                         admin_id,
                         admin_name,

@@ -10,8 +10,10 @@ class AdminService:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    summary = await self.results.summary(cursor)
-                    rows = await self.results.counts_by_difficulty(cursor)
+                    summary = await self.results.get_non_test_statistics_summary(cursor)
+                    rows = await self.results.get_non_test_statistics_counts_grouped_by_difficulty(
+                        cursor
+                    )
                 await connection.commit()
             except BaseException:
                 await connection.rollback()
@@ -24,22 +26,22 @@ class AdminService:
             self.db.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            return await self.results.recent(cursor)
+            return await self.results.get_latest_10_statistics(cursor)
 
     async def admin_logs(self):
         async with (
             self.db.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            return await self.logs.recent(cursor)
+            return await self.logs.get_latest_10_admin_logs(cursor)
 
     async def delete_test(self, admin_id, admin_name):
         async with self.db.get_connection() as connection:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    deleted = await self.results.delete_test(cursor)
-                    await self.logs.insert(
+                    deleted = await self.results.delete_test_statistics(cursor)
+                    await self.logs.insert_admin_log(
                         cursor,
                         admin_id,
                         admin_name,
