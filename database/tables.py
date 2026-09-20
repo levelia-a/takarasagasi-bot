@@ -1,10 +1,3 @@
-"""RailwayのMySQLターミナルで手動実行するテーブル定義。
-
-TABLES_SQL 内のSQLを、宝探しBot専用のデータベースで実行してください。
-このファイルは定義のみです。Bot起動時にSQLを実行する処理はありません。
-settings の未登録項目には consts/treasure.py の初期値を使用します。
-"""
-
 TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS settings (
     `key` VARCHAR(64) PRIMARY KEY,
