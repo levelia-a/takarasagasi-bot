@@ -6,7 +6,7 @@ LIA残高との連携は未実装です。参加費と報酬は仮想の値と�
 ## 構成
 
 ```text
-main.py             起動・依存関係の組み立て・コマンド同期
+main.py             起動・DB接続の初期化・コマンド同期
 config.py           環境変数と接続設定
 consts/             難易度・初期設定・Discord ID
 commands/           /takara・/takara_admin
@@ -19,7 +19,14 @@ tests/              ゲームルール・MySQL結合テスト
 ```
 
 依存方向は `commands/views → services → repositories` です。
-`DbService` は接続プールと接続の取得・解放を管理します。
+サービスとレポジトリのメソッドは `@staticmethod` で定義し、
+`await SettingsService.get_all()` や `await SettingsRepository.get_all_settings(cursor)` のように
+クラス名から直接呼び出します。インスタンスの生成や受け渡しは不要です。
+`DbService` はプロセス内で1つの接続プールを共有し、接続の取得・解放を管理します。
+起動時に `await DbService.connect(config.database)`、終了時に `await DbService.close()` を呼びます。
+1プロセス・1イベントループで1つのBotを動かす構成です。
+設定変更用のロックは `SettingsService` で共有します。
+各ゲームの進行状態とロックは `Exploration` インスタンスに保持し、Viewも画面ごとに生成します。
 各サービスが接続を取得し、設定更新＋管理ログ保存などの処理単位で
 `begin / commit / rollback` を実行します。レポジトリは同じ接続のカーソルを受け取り、SQLを実行して結果を返します。
 初期設定の補完・型変換・結果の組み立てはサービスの役割です。
@@ -32,7 +39,6 @@ tests/              ゲームルール・MySQL結合テスト
 例：`get_all_settings`、`upsert_setting_by_key`、`insert_admin_log`。
 結果保存は既存行を上書きしないため、`insert_statistics_record_if_session_id_not_exists` としています。
 
-`bot.py` は以前の起動コマンドとの互換用です。
 各ディレクトリは `__init__.py` を置かない暗黙の名前空間パッケージとして扱います。
 この仕組みはPython 3.3以降で利用できますが、このBotの動作要件はPython 3.12以上です。
 プロジェクトのルートディレクトリで、以下の起動・テストコマンドを実行してください。

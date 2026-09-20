@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from consts.treasure import DIFFICULTIES
-from services.settings_service import validate_settings
+from repositories.result_repository import ResultRepository
+from services.db_service import DbService
+from services.settings_service import SettingsService
 
 
 class TreasureStopped(ValueError):
@@ -41,19 +43,13 @@ class Exploration:
 
 
 class TreasureService:
-    def __init__(self, db, settings_service, result_repository, randint=None):
-        """宝探しで使用するDB・サービス・レポジトリ・抽選関数を保持する。"""
-        self.db = db
-        self.settings = settings_service
-        self.results = result_repository
-        self.randint = randint or random.randint
-
-    async def create(self, user_id, user_name, difficulty):
+    @staticmethod
+    async def create(user_id, user_name, difficulty):
         """運営状態と設定を確認し、開始時の設定を固定した探索を作る。"""
         if difficulty not in DIFFICULTIES:
             raise ValueError("不明な難易度です。")
-        settings = await self.settings.get_all()
-        validate_settings(settings)
+        settings = await SettingsService.get_all()
+        SettingsService.validate_settings(settings)
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
         return Exploration(
@@ -66,16 +62,17 @@ class TreasureService:
             settings["test_mode"],
         )
 
-    async def explore(self, session):
+    @staticmethod
+    async def explore(session):
         """探索を1回進め、報酬を計算し、終了した場合は結果を保存する。"""
         async with session.lock:
             if session.result is not None:
                 # 保存直前に通信が途切れた場合も、同じ結果を再試行できる。
-                await self.save_result(session)
+                await TreasureService.save_result(session)
                 return session
             session.exploration_count += 1
             success = session.test_mode == "always_success" or (
-                session.test_mode == "normal" and self.randint(1, 100) <= session.rate
+                session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
             if success:
                 session.success_count += 1
@@ -86,18 +83,20 @@ class TreasureService:
                 session.reward = 0
                 session.result = "failure"
             if session.result is not None:
-                await self.save_result(session)
+                await TreasureService.save_result(session)
             return session
 
-    async def retreat(self, session):
+    @staticmethod
+    async def retreat(session):
         """引き返して現在の報酬を確定し、結果を保存する。"""
         async with session.lock:
             if session.result is None:
                 session.result = "retreat"
-            await self.save_result(session)
+            await TreasureService.save_result(session)
             return session
 
-    async def save_result(self, session):
+    @staticmethod
+    async def save_result(session):
         """探索結果をDB保存用に整形し、セッション単位で重複なく保存する。"""
         result = {
             "session_id": session.id,
@@ -115,9 +114,9 @@ class TreasureService:
         }
         # 単一INSERTなのでautocommitで保存する。
         async with (
-            self.db.get_connection() as connection,
+            DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            await self.results.insert_statistics_record_if_session_id_not_exists(
+            await ResultRepository.insert_statistics_record_if_session_id_not_exists(
                 cursor, result
             )

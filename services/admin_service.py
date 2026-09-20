@@ -1,19 +1,21 @@
-class AdminService:
-    def __init__(self, db, results, logs):
-        """管理操作で使用するDBとレポジトリを保持する。"""
-        self.db = db
-        self.results = results
-        self.logs = logs
+from repositories.admin_log_repository import AdminLogRepository
+from repositories.result_repository import ResultRepository
+from services.db_service import DbService
 
-    async def statistics(self):
+
+class AdminService:
+    @staticmethod
+    async def statistics():
         # 合計と難易度別の件数を同じスナップショットから取得する。
         """テスト結果を除いた全体集計と難易度別件数を返す。"""
-        async with self.db.get_connection() as connection:
+        async with DbService.get_connection() as connection:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    summary = await self.results.get_non_test_statistics_summary(cursor)
-                    rows = await self.results.get_non_test_statistics_counts_grouped_by_difficulty(
+                    summary = await ResultRepository.get_non_test_statistics_summary(
+                        cursor
+                    )
+                    rows = await ResultRepository.get_non_test_statistics_counts_grouped_by_difficulty(
                         cursor
                     )
                 await connection.commit()
@@ -23,30 +25,33 @@ class AdminService:
         summary["difficulties"] = {row["difficulty"]: row["count"] for row in rows}
         return summary
 
-    async def history(self):
+    @staticmethod
+    async def history():
         """最新10件の宝探し履歴を取得する。"""
         async with (
-            self.db.get_connection() as connection,
+            DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            return await self.results.get_latest_10_statistics(cursor)
+            return await ResultRepository.get_latest_10_statistics(cursor)
 
-    async def admin_logs(self):
+    @staticmethod
+    async def admin_logs():
         """最新10件の管理者操作ログを取得する。"""
         async with (
-            self.db.get_connection() as connection,
+            DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            return await self.logs.get_latest_10_admin_logs(cursor)
+            return await AdminLogRepository.get_latest_10_admin_logs(cursor)
 
-    async def delete_test(self, admin_id, admin_name):
+    @staticmethod
+    async def delete_test(admin_id, admin_name):
         """テスト履歴の削除と管理ログ保存をまとめて確定する。"""
-        async with self.db.get_connection() as connection:
+        async with DbService.get_connection() as connection:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    deleted = await self.results.delete_test_statistics(cursor)
-                    await self.logs.insert_admin_log(
+                    deleted = await ResultRepository.delete_test_statistics(cursor)
+                    await AdminLogRepository.insert_admin_log(
                         cursor,
                         admin_id,
                         admin_name,

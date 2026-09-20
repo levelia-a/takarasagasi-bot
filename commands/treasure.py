@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from services.settings_service import SettingsService
 from views.admin import AdminView
 from views.common import require_admin
 from views.messages import treasure_panel
@@ -9,20 +10,14 @@ from views.treasure import TreasureView
 
 
 class TreasureCommands(commands.Cog):
-    def __init__(self, treasure, settings, admin):
-        """コマンドが使用する宝探し・設定・管理サービスを保持する。"""
-        self.treasure = treasure
-        self.settings = settings
-        self.admin = admin
-
     @app_commands.command(name="takara", description="宝探しパネルを表示します")
     @app_commands.guild_only()
     async def takara(self, interaction: discord.Interaction):
         """宝探しを開始する公開パネルを表示する。"""
         await interaction.response.defer()
-        settings = await self.settings.get_all()
+        settings = await SettingsService.get_all()
         await interaction.edit_original_response(
-            embed=treasure_panel(settings), view=TreasureView(self.treasure)
+            embed=treasure_panel(settings), view=TreasureView()
         )
 
     @app_commands.command(
@@ -45,5 +40,5 @@ class TreasureCommands(commands.Cog):
             inline=False,
         )
         await interaction.response.send_message(
-            embed=embed, view=AdminView(self.settings, self.admin), ephemeral=True
+            embed=embed, view=AdminView(), ephemeral=True
         )

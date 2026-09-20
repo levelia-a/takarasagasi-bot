@@ -3,16 +3,15 @@ import asyncio
 import discord
 
 from consts.treasure import DIFFICULTIES
-from services.treasure_service import TreasureStopped
+from services.treasure_service import TreasureService, TreasureStopped
 from views.common import BaseView
 from views.messages import exploration_text
 
 
 class ExplorationView(BaseView):
-    def __init__(self, service, session):
+    def __init__(self, session):
         """進行中の探索と操作ボタンを初期化する。"""
         super().__init__(timeout=300)
-        self.service = service
         self.session = session
         self.busy = False
         self.message = None
@@ -41,9 +40,9 @@ class ExplorationView(BaseView):
                     content="🔎 **さらに奥を探索中……**", view=self
                 )
                 await asyncio.sleep(1.5)
-                await self.service.explore(self.session)
+                await TreasureService.explore(self.session)
             else:
-                await self.service.retreat(self.session)
+                await TreasureService.retreat(self.session)
             if self.session.result is not None:
                 self.stop()
                 view = None
@@ -88,16 +87,15 @@ class ExplorationView(BaseView):
 
 
 class TreasureView(BaseView):
-    def __init__(self, service):
+    def __init__(self):
         """再起動後も使用する宝探しの入口パネルを初期化する。"""
         super().__init__(timeout=None)
-        self.service = service
 
     async def start(self, interaction, difficulty):
         """選択した難易度の探索を開始し、最初の結果を本人に表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            session = await self.service.create(
+            session = await TreasureService.create(
                 interaction.user.id, str(interaction.user), difficulty
             )
         except TreasureStopped as error:
@@ -110,10 +108,8 @@ class TreasureView(BaseView):
         await asyncio.sleep(1)
         await interaction.edit_original_response(content="🔎 **探索中……**")
         await asyncio.sleep(1.5)
-        await self.service.explore(session)
-        view = (
-            ExplorationView(self.service, session) if session.result is None else None
-        )
+        await TreasureService.explore(session)
+        view = ExplorationView(session) if session.result is None else None
         message = await interaction.edit_original_response(
             content=exploration_text(session), view=view
         )

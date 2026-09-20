@@ -1,15 +1,18 @@
 class SettingsRepository:
-    async def get_all_settings(self, cursor):
+    @staticmethod
+    async def get_all_settings(cursor):
         """settingsからすべての設定行を取得する。"""
         await cursor.execute("SELECT `key`, value FROM settings")
         return await cursor.fetchall()
 
-    async def get_all_settings_for_update(self, cursor):
+    @staticmethod
+    async def get_all_settings_for_update(cursor):
         """settingsの設定行を更新用にロックして取得する。"""
         await cursor.execute("SELECT `key`, value FROM settings FOR UPDATE")
         return await cursor.fetchall()
 
-    async def upsert_setting_by_key(self, cursor, key, value):
+    @staticmethod
+    async def upsert_setting_by_key(cursor, key, value):
         """指定キーの設定を追加し、存在する場合は値を更新する。"""
         await cursor.execute(
             "INSERT INTO settings (`key`, value) VALUES (%s, %s) "

@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from commands.treasure import TreasureCommands
 from consts.treasure import DEFAULT_SETTINGS
+from repositories.result_repository import ResultRepository
+from services.db_service import DbService
+from services.settings_service import SettingsService
 from services.treasure_service import TreasureService
 from views.admin import AdminView, SettingsModal, TestModeView
 from views.common import send_pages
@@ -28,13 +31,13 @@ def interaction(admin=False):
 
 class ViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_persistent_panel_and_commands(self):
-        view = TreasureView(AsyncMock())
+        view = TreasureView()
         self.assertTrue(view.is_persistent())
         self.assertEqual(
             {item.custom_id for item in view.children},
             {"takara_beginner", "takara_intermediate", "takara_advanced"},
         )
-        cog = TreasureCommands(None, None, None)
+        cog = TreasureCommands()
         self.assertEqual(
             {command.name for command in cog.get_app_commands()},
             {"takara", "takara_admin"},
@@ -42,34 +45,52 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_admin_gates_include_modal_and_test_mode(self):
         for view in (
-            AdminView(None, None),
-            TestModeView(None),
-            SettingsModal(None, "rate"),
+            AdminView(),
+            TestModeView(),
+            SettingsModal("rate"),
         ):
             with self.subTest(view=type(view).__name__):
                 self.assertFalse(await view.interaction_check(interaction()))
                 self.assertTrue(await view.interaction_check(interaction(admin=True)))
 
     async def test_other_user_cannot_play(self):
-        view = ExplorationView(None, SimpleNamespace(user_id=2))
+        view = ExplorationView(SimpleNamespace(user_id=2))
         self.assertFalse(await view.interaction_check(interaction()))
 
     async def test_rapid_button_click_is_rejected(self):
-        view = ExplorationView(AsyncMock(), SimpleNamespace(user_id=1))
+        view = ExplorationView(SimpleNamespace(user_id=1))
         view.busy = True
         event = interaction()
-        await view.act(event, True)
+        with patch.object(
+            TreasureService, "explore", new_callable=AsyncMock
+        ) as explore:
+            await view.act(event, True)
         event.response.send_message.assert_awaited_once()
-        view.service.explore.assert_not_awaited()
+        explore.assert_not_awaited()
 
     async def test_exploration_button_calls_service_and_clears_completed_view(self):
-        settings = AsyncMock()
-        settings.get_all.return_value = DEFAULT_SETTINGS | {"beginner_max": 1}
+        self.enterContext(
+            patch.object(
+                SettingsService,
+                "get_all",
+                new=AsyncMock(return_value=DEFAULT_SETTINGS | {"beginner_max": 1}),
+            )
+        )
         db = MagicMock()
         db.get_connection.return_value.__aenter__.return_value = MagicMock()
-        service = TreasureService(db, settings, AsyncMock(), lambda low, high: 1)
-        session = await service.create(1, "テスト", "beginner")
-        view = ExplorationView(service, session)
+        self.enterContext(patch.object(DbService, "get_connection", db.get_connection))
+        self.enterContext(
+            patch.object(
+                ResultRepository,
+                "insert_statistics_record_if_session_id_not_exists",
+                new_callable=AsyncMock,
+            )
+        )
+        self.enterContext(
+            patch("services.treasure_service.random.randint", return_value=1)
+        )
+        session = await TreasureService.create(1, "テスト", "beginner")
+        view = ExplorationView(session)
         event = interaction()
         with patch("views.treasure.asyncio.sleep", new=AsyncMock()):
             await view.act(event, True)

@@ -1,12 +1,14 @@
 import discord
 
 from consts.treasure import DIFFICULTIES, TEST_MODES
+from services.admin_service import AdminService
+from services.settings_service import SettingsService
 from views.common import AdminOnlyModal, AdminOnlyView, send_pages
 from views.messages import history_entries, log_entries, settings_text, statistics_text
 
 
 class SettingsModal(AdminOnlyModal):
-    def __init__(self, settings, kind):
+    def __init__(self, kind):
         """指定した設定項目を難易度別に入力するモーダルを作る。"""
         titles = {
             "price": "💰 宝探し価格設定",
@@ -14,7 +16,6 @@ class SettingsModal(AdminOnlyModal):
             "max": "🔎 最大探索回数設定",
         }
         super().__init__(title=titles[kind])
-        self.settings = settings
         self.kind = kind
         self.inputs = {}
         for key, difficulty in DIFFICULTIES.items():
@@ -32,7 +33,7 @@ class SettingsModal(AdminOnlyModal):
                 f"{key}_{self.kind}": int(field.value)
                 for key, field in self.inputs.items()
             }
-            await self.settings.update(
+            await SettingsService.update(
                 values, interaction.user.id, str(interaction.user), self.title
             )
         except ValueError as error:
@@ -42,20 +43,19 @@ class SettingsModal(AdminOnlyModal):
             return
         await interaction.edit_original_response(
             content="✅ 設定を変更しました。\n\n"
-            + settings_text(await self.settings.get_all())
+            + settings_text(await SettingsService.get_all())
         )
 
 
 class TestModeView(AdminOnlyView):
-    def __init__(self, settings):
+    def __init__(self):
         """テストモードを選ぶボタンを初期化する。"""
         super().__init__(timeout=120)
-        self.settings = settings
 
     async def change(self, interaction, mode):
         """テストモードを変更し、選択画面を閉じる。"""
         await interaction.response.defer()
-        await self.settings.update(
+        await SettingsService.update(
             {"test_mode": mode},
             interaction.user.id,
             str(interaction.user),
@@ -85,16 +85,15 @@ class TestModeView(AdminOnlyView):
 
 
 class DeleteTestView(AdminOnlyView):
-    def __init__(self, admin):
+    def __init__(self):
         """テスト履歴の削除確認ボタンを初期化する。"""
         super().__init__(timeout=120)
-        self.admin = admin
 
     @discord.ui.button(label="削除する", emoji="🗑️", style=discord.ButtonStyle.danger)
     async def delete(self, interaction, button):
         """テスト履歴を削除し、削除件数を表示する。"""
         await interaction.response.defer()
-        deleted = await self.admin.delete_test(
+        deleted = await AdminService.delete_test(
             interaction.user.id, str(interaction.user)
         )
         await interaction.edit_original_response(
@@ -114,11 +113,9 @@ class DeleteTestView(AdminOnlyView):
 
 
 class AdminView(AdminOnlyView):
-    def __init__(self, settings, admin):
+    def __init__(self):
         """設定変更や履歴確認に使う管理パネルを初期化する。"""
         super().__init__(timeout=300)
-        self.settings = settings
-        self.admin = admin
 
     @discord.ui.button(
         label="現在の設定", emoji="⚙️", style=discord.ButtonStyle.secondary, row=0
@@ -127,7 +124,7 @@ class AdminView(AdminOnlyView):
         """現在の設定を管理者本人に表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.edit_original_response(
-            content=settings_text(await self.settings.get_all())
+            content=settings_text(await SettingsService.get_all())
         )
 
     @discord.ui.button(
@@ -135,21 +132,21 @@ class AdminView(AdminOnlyView):
     )
     async def price_button(self, interaction, button):
         """価格設定の入力モーダルを開く。"""
-        await interaction.response.send_modal(SettingsModal(self.settings, "price"))
+        await interaction.response.send_modal(SettingsModal("price"))
 
     @discord.ui.button(
         label="成功率設定", emoji="🎯", style=discord.ButtonStyle.primary, row=0
     )
     async def rate_button(self, interaction, button):
         """成功率設定の入力モーダルを開く。"""
-        await interaction.response.send_modal(SettingsModal(self.settings, "rate"))
+        await interaction.response.send_modal(SettingsModal("rate"))
 
     @discord.ui.button(
         label="探索回数設定", emoji="🔎", style=discord.ButtonStyle.primary, row=1
     )
     async def max_button(self, interaction, button):
         """最大探索回数の入力モーダルを開く。"""
-        await interaction.response.send_modal(SettingsModal(self.settings, "max"))
+        await interaction.response.send_modal(SettingsModal("max"))
 
     @discord.ui.button(
         label="ON / OFF", emoji="🔄", style=discord.ButtonStyle.success, row=1
@@ -157,7 +154,7 @@ class AdminView(AdminOnlyView):
     async def operation_button(self, interaction, button):
         """運営状態のON・OFFを切り替え、結果を表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
-        value = await self.settings.toggle_operation(
+        value = await SettingsService.toggle_operation(
             interaction.user.id, str(interaction.user)
         )
         await interaction.edit_original_response(
@@ -171,7 +168,7 @@ class AdminView(AdminOnlyView):
         """テストモードの選択画面を表示する。"""
         await interaction.response.send_message(
             "🧪 テストモードを選択してください。",
-            view=TestModeView(self.settings),
+            view=TestModeView(),
             ephemeral=True,
         )
 
@@ -182,7 +179,7 @@ class AdminView(AdminOnlyView):
         """テスト結果を除いた宝探しの統計を表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.edit_original_response(
-            content=statistics_text(await self.admin.statistics())
+            content=statistics_text(await AdminService.statistics())
         )
 
     @discord.ui.button(
@@ -191,7 +188,7 @@ class AdminView(AdminOnlyView):
     async def history_button(self, interaction, button):
         """最新の宝探し履歴を文字数制限に合わせて表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await send_pages(interaction, history_entries(await self.admin.history()))
+        await send_pages(interaction, history_entries(await AdminService.history()))
 
     @discord.ui.button(
         label="テストデータ削除", emoji="🧹", style=discord.ButtonStyle.danger, row=3
@@ -200,7 +197,7 @@ class AdminView(AdminOnlyView):
         """テスト履歴の削除確認画面を表示する。"""
         await interaction.response.send_message(
             "⚠️ テストデータを削除しますか？",
-            view=DeleteTestView(self.admin),
+            view=DeleteTestView(),
             ephemeral=True,
         )
 
@@ -210,4 +207,4 @@ class AdminView(AdminOnlyView):
     async def logs_button(self, interaction, button):
         """最新の管理者操作ログを文字数制限に合わせて表示する。"""
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await send_pages(interaction, log_entries(await self.admin.admin_logs()))
+        await send_pages(interaction, log_entries(await AdminService.admin_logs()))

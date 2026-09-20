@@ -1,4 +1,4 @@
-"""エントリーポイント。依存関係を組み立て、Botを起動する。"""
+"""エントリーポイント。DB接続とDiscord Botの起動を管理する。"""
 
 import asyncio
 import logging
@@ -8,13 +8,8 @@ from discord.ext import commands
 
 from commands.treasure import TreasureCommands
 from config import Config
-from repositories.admin_log_repository import AdminLogRepository
-from repositories.result_repository import ResultRepository
-from repositories.settings_repository import SettingsRepository
-from services.admin_service import AdminService
 from services.db_service import DbService
-from services.settings_service import SettingsService, validate_settings
-from services.treasure_service import TreasureService
+from services.settings_service import SettingsService
 from views.common import report_error
 from views.treasure import TreasureView
 
@@ -23,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class TreasureBot(commands.Bot):
     def __init__(self, config):
-        """Botと各サービスを初期化する。"""
+        """Botの基本設定とエラーハンドラーを初期化する。"""
         super().__init__(
             command_prefix="!",
             intents=discord.Intents.default(),
@@ -31,21 +26,14 @@ class TreasureBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions.none(),
         )
         self.config = config
-        self.db = DbService(config.database)
-        settings_repository = SettingsRepository()
-        results = ResultRepository()
-        logs = AdminLogRepository()
-        self.settings = SettingsService(self.db, settings_repository, logs)
-        self.treasure = TreasureService(self.db, self.settings, results)
-        self.admin = AdminService(self.db, results, logs)
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self):
         """DB接続を開始し、コマンドと常設パネルを登録する。"""
-        await self.db.connect()
-        validate_settings(await self.settings.get_all())
-        await self.add_cog(TreasureCommands(self.treasure, self.settings, self.admin))
-        self.add_view(TreasureView(self.treasure))
+        await DbService.connect(self.config.database)
+        SettingsService.validate_settings(await SettingsService.get_all())
+        await self.add_cog(TreasureCommands())
+        self.add_view(TreasureView())
         guild = discord.Object(id=self.config.guild_id)
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
@@ -64,7 +52,7 @@ class TreasureBot(commands.Bot):
         try:
             await super().close()
         finally:
-            await self.db.close()
+            await DbService.close()
 
 
 async def run():
