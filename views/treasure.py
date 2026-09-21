@@ -102,6 +102,7 @@ class TreasureView(BaseView):
         except TreasureStopped as error:
             await interaction.edit_original_response(content=f"🔴 {error}")
             return
+        # 難易度解放システム：未解放なら本人だけに現在の進捗を表示する。
         except DifficultyLocked as error:
             await interaction.edit_original_response(content=str(error))
             return
