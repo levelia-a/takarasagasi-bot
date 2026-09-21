@@ -1,7 +1,8 @@
 """難易度解放システム。
 
-初級は最初から解放し、初級の探索回数で中級、中級の探索回数で上級を解放する。
-解放に必要な回数は管理者設定から変更できる。
+初級は最初から挑戦できる。
+中級は初級の探索回数、上級は中級の探索回数を現在の管理者設定と比較して判定する。
+解放状態そのものは保存せず、常に探索回数を基準にする。
 """
 
 from repositories.progress_repository import ProgressRepository
@@ -15,6 +16,7 @@ class DifficultyLocked(ValueError):
 class ProgressService:
     @staticmethod
     async def get(user_id):
+        """ユーザーの探索回数を取得する。未記録なら0回として扱う。"""
         async with (
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
@@ -23,29 +25,26 @@ class ProgressService:
         return row or {
             "beginner_explorations": 0,
             "intermediate_explorations": 0,
-            "intermediate_unlocked": 0,
-            "advanced_unlocked": 0,
         }
 
     @staticmethod
     async def require_unlocked(user_id, difficulty, settings):
-        """開始前に難易度の解放状態を確認し、未解放なら残り回数を通知する。"""
+        """現在の探索回数と解放条件を比較し、未達なら開始を拒否する。"""
         if difficulty == "beginner":
             return
+
         progress = await ProgressService.get(user_id)
-        if difficulty == "intermediate" and progress["intermediate_unlocked"]:
-            return
-        if difficulty == "advanced" and progress["advanced_unlocked"]:
-            return
         if difficulty == "intermediate":
-            current, required = progress["beginner_explorations"], settings["intermediate_unlock"]
+            current = progress["beginner_explorations"]
+            required = settings["intermediate_unlock"]
             if current < required:
                 raise DifficultyLocked(
                     f"🔒 中級宝探しはまだ解放されていません。\n"
                     f"初級探索：**{current}/{required}回**\nあと **{required-current}回** です。"
                 )
         elif difficulty == "advanced":
-            current, required = progress["intermediate_explorations"], settings["advanced_unlock"]
+            current = progress["intermediate_explorations"]
+            required = settings["advanced_unlock"]
             if current < required:
                 raise DifficultyLocked(
                     f"🔒 上級宝探しはまだ解放されていません。\n"
@@ -54,7 +53,7 @@ class ProgressService:
 
     @staticmethod
     async def record_exploration(user_id, difficulty, settings):
-        """通常プレイの探索を1回記録し、今回解放された難易度があれば返す。"""
+        """通常プレイの探索を1回記録し、今回ちょうど到達した難易度があれば返す。"""
         async with (
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
@@ -62,26 +61,15 @@ class ProgressService:
             progress = await ProgressRepository.increment_explorations(
                 cursor, user_id, difficulty
             )
+
         if (
             difficulty == "beginner"
-            and not progress["intermediate_unlocked"]
-            and progress["beginner_explorations"] >= settings["intermediate_unlock"]
+            and progress["beginner_explorations"] == settings["intermediate_unlock"]
         ):
-            async with (
-                DbService.get_connection() as connection,
-                connection.cursor() as cursor,
-            ):
-                await ProgressRepository.mark_unlocked(cursor, user_id, "intermediate")
             return "intermediate"
         if (
             difficulty == "intermediate"
-            and not progress["advanced_unlocked"]
-            and progress["intermediate_explorations"] >= settings["advanced_unlock"]
+            and progress["intermediate_explorations"] == settings["advanced_unlock"]
         ):
-            async with (
-                DbService.get_connection() as connection,
-                connection.cursor() as cursor,
-            ):
-                await ProgressRepository.mark_unlocked(cursor, user_id, "advanced")
             return "advanced"
         return None
