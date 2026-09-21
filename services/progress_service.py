@@ -89,6 +89,9 @@ class ProgressService:
             async with DbService.get_connection() as connection, connection.cursor() as cursor:
                 if await ProgressRepository.claim_unlock_notification(cursor, user_id, "advanced"):
                     unlocked = "advanced"
+        # 正常完了した探索の再試行用IDは不要なので、その場で削除して肥大化を防ぐ。
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await ProgressRepository.delete_progress_event(cursor, exploration_id)
         return unlocked
 
 
