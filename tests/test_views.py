@@ -11,6 +11,7 @@ from services.settings_service import SettingsService
 from services.treasure_service import TreasureService
 from views.admin import AdminView, SettingsModal, TestModeView
 from views.common import send_pages
+from views.messages import exploration_text
 from views.treasure import ExplorationView, TreasureView
 
 
@@ -102,6 +103,18 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
             await view.act(event, True)
         self.assertEqual(session.result, "max_success")
         self.assertIsNone(event.edit_original_response.call_args.kwargs["view"])
+
+    async def test_failed_exploration_includes_unlock_notification(self):
+        session = SimpleNamespace(
+            result="failure",
+            difficulty_name="初級",
+            unlocked_difficulty="intermediate",
+        )
+        text = exploration_text(session)
+        self.assertIn("探索失敗", text)
+        self.assertIn("難易度解放", text)
+        self.assertIn("中級宝探し", text)
+        self.assertIsNone(session.unlocked_difficulty)
 
     async def test_long_history_is_split_without_second_defer(self):
         event = interaction()
