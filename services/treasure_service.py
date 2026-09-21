@@ -8,6 +8,7 @@ from uuid import uuid4
 from consts.treasure import DIFFICULTIES
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
+from services.progress_service import ProgressService
 from services.settings_service import SettingsService
 
 
@@ -29,6 +30,8 @@ class Exploration:
     success_count: int = 0
     reward: int = 0
     result: str | None = None
+    unlocked_difficulty: str | None = None
+    settings: dict = field(default_factory=dict, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
@@ -52,6 +55,7 @@ class TreasureService:
         SettingsService.validate_settings(settings)
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
+        await ProgressService.require_unlocked(user_id, difficulty, settings)
         return Exploration(
             user_id,
             user_name,
@@ -60,6 +64,7 @@ class TreasureService:
             settings[f"{difficulty}_rate"],
             settings[f"{difficulty}_max"],
             settings["test_mode"],
+            settings=settings,
         )
 
     @staticmethod
@@ -71,6 +76,12 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
             session.exploration_count += 1
+            if not session.is_test:
+                unlocked = await ProgressService.record_exploration(
+                    session.user_id, session.difficulty, session.settings
+                )
+                if unlocked:
+                    session.unlocked_difficulty = unlocked
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
