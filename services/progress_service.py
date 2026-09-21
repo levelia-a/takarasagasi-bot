@@ -6,6 +6,7 @@
 """
 
 from repositories.progress_repository import ProgressRepository
+from repositories.result_repository import ResultRepository
 from services.db_service import DbService
 from services.settings_service import SettingsService
 
@@ -53,15 +54,19 @@ class ProgressService:
                 )
 
     @staticmethod
-    async def record_exploration(user_id, difficulty, exploration_id):
-        """通常プレイの探索を重複なく1回記録し、現在の条件で解放通知を判定する。"""
+    async def record_exploration(user_id, difficulty, exploration_id, result=None):
+        """探索進捗を保存し、終了結果があれば同じトランザクションで保存する。"""
         async with DbService.get_connection() as connection:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
-                    progress = await ProgressRepository.increment_explorations(
+                    progress, _ = await ProgressRepository.increment_explorations(
                         cursor, user_id, difficulty, exploration_id
                     )
+                    if result is not None:
+                        await ResultRepository.insert_statistics_record_if_session_id_not_exists(
+                            cursor, result
+                        )
                 await connection.commit()
             except BaseException:
                 await connection.rollback()
@@ -71,12 +76,25 @@ class ProgressService:
         settings = await SettingsService.get_all()
         if (
             difficulty == "beginner"
-            and progress["beginner_explorations"] == settings["intermediate_unlock"]
+            and progress["beginner_explorations"] >= settings["intermediate_unlock"]
         ):
-            return "intermediate"
+            async with DbService.get_connection() as connection, connection.cursor() as cursor:
+                if await ProgressRepository.claim_unlock_notification(cursor, user_id, "intermediate"):
+                    return "intermediate"
         if (
             difficulty == "intermediate"
-            and progress["intermediate_explorations"] == settings["advanced_unlock"]
+            and progress["intermediate_explorations"] >= settings["advanced_unlock"]
         ):
-            return "advanced"
+            async with DbService.get_connection() as connection, connection.cursor() as cursor:
+                if await ProgressRepository.claim_unlock_notification(cursor, user_id, "advanced"):
+                    return "advanced"
         return None
+
+
+    @staticmethod
+    async def acknowledge_exploration(exploration_id):
+        """Discordへの結果表示後、再試行用イベントを削除する。"""
+        if exploration_id is None:
+            return
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await ProgressRepository.delete_progress_event(cursor, exploration_id)
