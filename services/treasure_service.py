@@ -16,6 +16,10 @@ class TreasureStopped(ValueError):
     pass
 
 
+class TreasureAlreadyActive(ValueError):
+    pass
+
+
 @dataclass
 class Exploration:
     user_id: int
@@ -47,6 +51,25 @@ class Exploration:
 
 
 class TreasureService:
+    _active_users = set()
+    _active_users_lock = asyncio.Lock()
+
+    @staticmethod
+    async def _claim_user(user_id):
+        """同一プロセス内で1ユーザー1セッションだけ開始できるようにする。"""
+        async with TreasureService._active_users_lock:
+            if user_id in TreasureService._active_users:
+                raise TreasureAlreadyActive(
+                    "進行中の宝探しがあります。先にその探索を完了してください。"
+                )
+            TreasureService._active_users.add(user_id)
+
+    @staticmethod
+    async def release_user(user_id):
+        """終了・タイムアウトしたユーザーの開始ロックを解放する。"""
+        async with TreasureService._active_users_lock:
+            TreasureService._active_users.discard(user_id)
+
     @staticmethod
     async def create(user_id, user_name, difficulty):
         """運営状態と設定を確認し、開始時の設定を固定した探索を作る。"""
@@ -58,17 +81,22 @@ class TreasureService:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
         unlock_notice = await ProgressService.require_unlocked(user_id, difficulty, settings)
-        return Exploration(
-            user_id,
-            user_name,
-            difficulty,
-            settings[f"{difficulty}_price"],
-            settings[f"{difficulty}_rate"],
-            settings[f"{difficulty}_max"],
-            settings["test_mode"],
-            unlocked_difficulty=unlock_notice,
-            settings=settings,
-        )
+        await TreasureService._claim_user(user_id)
+        try:
+            return Exploration(
+                user_id,
+                user_name,
+                difficulty,
+                settings[f"{difficulty}_price"],
+                settings[f"{difficulty}_rate"],
+                settings[f"{difficulty}_max"],
+                settings["test_mode"],
+                unlocked_difficulty=unlock_notice,
+                settings=settings,
+            )
+        except BaseException:
+            await TreasureService.release_user(user_id)
+            raise
 
     @staticmethod
     async def explore(session):
@@ -121,6 +149,8 @@ class TreasureService:
                 session.pending_exploration_id = None
             elif session.result is not None:
                 await TreasureService.save_result(session)
+            if session.result is not None:
+                await TreasureService.release_user(session.user_id)
             return session
 
     @staticmethod
@@ -130,6 +160,7 @@ class TreasureService:
             if session.result is None:
                 session.result = "retreat"
             await TreasureService.save_result(session)
+            await TreasureService.release_user(session.user_id)
             return session
 
     @staticmethod
