@@ -32,7 +32,6 @@ class Exploration:
     result: str | None = None
     unlocked_difficulty: str | None = None
     pending_exploration_id: str | None = None
-    last_exploration_id: str | None = None
     settings: dict = field(default_factory=dict, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
@@ -85,7 +84,6 @@ class TreasureService:
                 )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
-                session.last_exploration_id = session.pending_exploration_id
                 session.pending_exploration_id = None
                 return session
 
@@ -119,7 +117,6 @@ class TreasureService:
                 )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
-                session.last_exploration_id = session.pending_exploration_id
                 session.pending_exploration_id = None
             elif session.result is not None:
                 await TreasureService.save_result(session)
@@ -164,10 +161,3 @@ class TreasureService:
                 cursor, result
             )
 
-    @staticmethod
-    async def acknowledge_display(session):
-        """Discordへの結果表示成功後、通知と再試行用イベントを消費する。"""
-        session.unlocked_difficulty = None
-        if session.last_exploration_id is not None:
-            await ProgressService.acknowledge_exploration(session.last_exploration_id)
-            session.last_exploration_id = None
