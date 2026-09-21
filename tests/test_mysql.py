@@ -162,6 +162,36 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual((await cursor.fetchone())["count"], 3)
 
+    async def test_unlock_notification_is_marked_only_after_display_ack(self):
+        user_id = 1545489116127559690
+        await SettingsService.update(
+            {"intermediate_unlock": 1}, 1, "admin", "解放条件変更"
+        )
+        session = await TreasureService.create(user_id, "notice-test", "beginner")
+        await TreasureService.explore(session)
+        self.assertEqual(session.unlocked_difficulty, "intermediate")
+
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            self.assertFalse(
+                await ProgressRepository.has_unlock_notification(
+                    cursor, user_id, "intermediate"
+                )
+            )
+
+        await ProgressService.mark_unlock_notification(user_id, "intermediate")
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            self.assertTrue(
+                await ProgressRepository.has_unlock_notification(
+                    cursor, user_id, "intermediate"
+                )
+            )
+
     async def test_unlock_notification_uses_current_settings(self):
         user_id = 1545489116127559685
         await SettingsService.update(
