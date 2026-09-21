@@ -48,6 +48,7 @@ class SettingsModal(AdminOnlyModal):
 
 
 class UnlockSettingsModal(AdminOnlyModal):
+    """難易度解放システム：中級・上級の必要探索回数を変更する管理者モーダル。"""
     def __init__(self):
         super().__init__(title="🔓 難易度解放設定")
         self.intermediate = discord.ui.TextInput(
