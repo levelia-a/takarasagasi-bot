@@ -114,10 +114,13 @@ class TreasureService:
                 if unlocked:
                     session.unlocked_difficulty = unlocked
                 session.pending_exploration_id = None
+                if session.result is not None:
+                    await TreasureService.release_user(session.user_id)
                 return session
 
             if session.result is not None:
                 await TreasureService.save_result(session)
+                await TreasureService.release_user(session.user_id)
                 return session
 
             session.exploration_count += 1
