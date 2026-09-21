@@ -86,7 +86,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await AdminService.history()), 1)
         self.assertEqual(len(await AdminService.admin_logs()), 3)
 
-    async def test_difficulty_unlock_is_permanent_after_threshold_change(self):
+    async def test_difficulty_unlock_is_based_on_current_exploration_count(self):
         user_id = 1545489116127559683
         await SettingsService.update(
             {"intermediate_unlock": 1}, 1, "admin", "解放条件変更"
@@ -94,10 +94,20 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         session = await TreasureService.create(user_id, "unlock-test", "beginner")
         await TreasureService.explore(session)
 
-        # 一度解放した後に必要回数を引き上げても再ロックされない。
+        # 初級探索1回・条件1回なら中級に挑戦できる。
+        unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
+        self.assertEqual(unlocked.difficulty, "intermediate")
+
+        # 条件を2回へ引き上げると、探索回数1回では再び未達になる。
         await SettingsService.update(
-            {"intermediate_unlock": 100}, 1, "admin", "解放条件変更"
+            {"intermediate_unlock": 2}, 1, "admin", "解放条件変更"
         )
+        with self.assertRaises(ValueError):
+            await TreasureService.create(user_id, "unlock-test", "intermediate")
+
+        # 初級をもう1回探索して合計2回になれば、再び中級に挑戦できる。
+        session = await TreasureService.create(user_id, "unlock-test", "beginner")
+        await TreasureService.explore(session)
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
 
