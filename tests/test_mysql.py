@@ -98,10 +98,12 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         )
         session = await TreasureService.create(user_id, "unlock-test", "beginner")
         await TreasureService.explore(session)
+        await TreasureService.retreat(session)
 
         # 初級探索1回・条件1回なら中級に挑戦できる。
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
+        await TreasureService.retreat(unlocked)
 
         # 条件を2回へ引き上げると、探索回数1回では再び未達になる。
         await SettingsService.update(
@@ -113,6 +115,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         # 初級をもう1回探索して合計2回になれば、再び中級に挑戦できる。
         session = await TreasureService.create(user_id, "unlock-test", "beginner")
         await TreasureService.explore(session)
+        await TreasureService.retreat(session)
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
 
@@ -205,6 +208,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         )
         await TreasureService.explore(session)
         self.assertIsNone(session.unlocked_difficulty)
+        await TreasureService.retreat(session)
 
         # 現在条件の2回目に到達した時点で通知対象になる。
         session = await TreasureService.create(user_id, "settings-test", "beginner")
@@ -238,9 +242,10 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await SettingsService.update(
             {"intermediate_unlock": 20}, 1, "admin", "解放条件変更"
         )
-        for _ in range(15):
+        for _ in range(3):
             session = await TreasureService.create(user_id, "lower-test", "beginner")
-            await TreasureService.explore(session)
+            for _ in range(5):
+                await TreasureService.explore(session)
 
         await SettingsService.update(
             {"intermediate_unlock": 10}, 1, "admin", "解放条件変更"
