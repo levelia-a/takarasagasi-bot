@@ -54,7 +54,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            for table in ("admin_logs", "user_progress_events", "user_progress", "statistics", "settings"):
+            for table in ("admin_logs", "unlock_notifications", "user_progress_events", "user_progress", "statistics", "settings"):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -134,7 +134,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
-            self.assertEqual(session.exploration_count, 0)
+            self.assertEqual(session.exploration_count, 1)
 
             await TreasureService.explore(session)
             await TreasureService.explore(session)
@@ -163,6 +163,44 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
 
         # 現在条件の2回目に到達した時点で通知対象になる。
         session = await TreasureService.create(user_id, "settings-test", "beginner")
+        await TreasureService.explore(session)
+        self.assertEqual(session.unlocked_difficulty, "intermediate")
+
+    async def test_final_result_failure_rolls_back_progress_with_statistics(self):
+        user_id = 1545489116127559686
+        await SettingsService.update(
+            {"beginner_max": 1}, 1, "admin", "最大探索変更"
+        )
+        session = await TreasureService.create(user_id, "atomic-test", "beginner")
+        with patch(
+            "services.progress_service.ResultRepository.insert_statistics_record_if_session_id_not_exists",
+            side_effect=RuntimeError("statistics save failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+
+        progress = await ProgressService.get_exploration_counts(user_id)
+        self.assertEqual(progress["beginner_explorations"], 0)
+        self.assertEqual(len(await AdminService.history()), 0)
+
+        await TreasureService.explore(session)
+        progress = await ProgressService.get_exploration_counts(user_id)
+        self.assertEqual(progress["beginner_explorations"], 1)
+        self.assertEqual(len(await AdminService.history()), 1)
+
+    async def test_lowered_threshold_can_issue_unlock_notification(self):
+        user_id = 1545489116127559687
+        await SettingsService.update(
+            {"intermediate_unlock": 20}, 1, "admin", "解放条件変更"
+        )
+        for _ in range(15):
+            session = await TreasureService.create(user_id, "lower-test", "beginner")
+            await TreasureService.explore(session)
+
+        await SettingsService.update(
+            {"intermediate_unlock": 10}, 1, "admin", "解放条件変更"
+        )
+        session = await TreasureService.create(user_id, "lower-test", "beginner")
         await TreasureService.explore(session)
         self.assertEqual(session.unlocked_difficulty, "intermediate")
 
