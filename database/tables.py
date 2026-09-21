@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS statistics (
 CREATE TABLE IF NOT EXISTS user_progress (
     user_id BIGINT UNSIGNED PRIMARY KEY,
     beginner_explorations INT UNSIGNED NOT NULL DEFAULT 0,
-    intermediate_explorations INT UNSIGNED NOT NULL DEFAULT 0
+    intermediate_explorations INT UNSIGNED NOT NULL DEFAULT 0,
+    intermediate_unlocked BOOLEAN NOT NULL DEFAULT FALSE,
+    advanced_unlocked BOOLEAN NOT NULL DEFAULT FALSE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS admin_logs (
