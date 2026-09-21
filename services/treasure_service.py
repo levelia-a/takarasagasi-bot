@@ -31,6 +31,7 @@ class Exploration:
     reward: int = 0
     result: str | None = None
     unlocked_difficulty: str | None = None
+    pending_exploration_id: str | None = None
     settings: dict = field(default_factory=dict, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
@@ -70,27 +71,26 @@ class TreasureService:
 
     @staticmethod
     async def explore(session):
-        """探索を1回進め、報酬を計算し、終了した場合は結果を保存する。"""
+        """探索を1回進め、進捗と終了結果を整合性を保って保存する。"""
         async with session.lock:
-            if session.result is not None:
-                # 保存直前に通信が途切れた場合も、同じ結果を再試行できる。
-                await TreasureService.save_result(session)
-                return session
-            session.exploration_count += 1
-            # 難易度解放システム：実際の探索判定ごとに1回加算する。
-            # 保存に失敗した場合は同じ探索番号を再試行し、DB側の探索IDで二重加算を防ぐ。
-            # 管理者のテストモードではユーザー進捗を増やさない。
-            if not session.is_test:
-                exploration_id = f"{session.id}:{session.exploration_count}"
-                try:
-                    unlocked = await ProgressService.record_exploration(
-                        session.user_id, session.difficulty, exploration_id
-                    )
-                except BaseException:
-                    session.exploration_count -= 1
-                    raise
+            # 前回のDB保存が失敗した場合は、同じ探索を再抽選せず保存だけ再試行する。
+            if session.pending_exploration_id is not None:
+                result = TreasureService.build_result(session) if session.result else None
+                unlocked = await ProgressService.record_exploration(
+                    session.user_id,
+                    session.difficulty,
+                    session.pending_exploration_id,
+                    result,
+                )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
+                return session
+
+            if session.result is not None:
+                await TreasureService.save_result(session)
+                return session
+
+            session.exploration_count += 1
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
@@ -102,7 +102,21 @@ class TreasureService:
             else:
                 session.reward = 0
                 session.result = "failure"
-            if session.result is not None:
+
+            if not session.is_test:
+                session.pending_exploration_id = (
+                    f"{session.id}:{session.exploration_count}"
+                )
+                result = TreasureService.build_result(session) if session.result else None
+                unlocked = await ProgressService.record_exploration(
+                    session.user_id,
+                    session.difficulty,
+                    session.pending_exploration_id,
+                    result,
+                )
+                if unlocked:
+                    session.unlocked_difficulty = unlocked
+            elif session.result is not None:
                 await TreasureService.save_result(session)
             return session
 
@@ -116,9 +130,9 @@ class TreasureService:
             return session
 
     @staticmethod
-    async def save_result(session):
-        """探索結果をDB保存用に整形し、セッション単位で重複なく保存する。"""
-        result = {
+    def build_result(session):
+        """現在の探索状態をDB保存用の結果辞書へ変換する。"""
+        return {
             "session_id": session.id,
             "user_id": session.user_id,
             "user_name": session.user_name,
@@ -132,7 +146,11 @@ class TreasureService:
             else None,
             "is_test": session.is_test,
         }
-        # 単一INSERTなのでautocommitで保存する。
+
+    @staticmethod
+    async def save_result(session):
+        """探索結果をセッションID単位で重複なく保存する。"""
+        result = TreasureService.build_result(session)
         async with (
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
@@ -140,3 +158,11 @@ class TreasureService:
             await ResultRepository.insert_statistics_record_if_session_id_not_exists(
                 cursor, result
             )
+
+    @staticmethod
+    async def acknowledge_display(session):
+        """Discordへの結果表示成功後、通知と再試行用イベントを消費する。"""
+        session.unlocked_difficulty = None
+        if session.pending_exploration_id is not None:
+            await ProgressService.acknowledge_exploration(session.pending_exploration_id)
+            session.pending_exploration_id = None
