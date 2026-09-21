@@ -57,7 +57,7 @@ class TreasureService:
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
-        await ProgressService.require_unlocked(user_id, difficulty, settings)
+        unlock_notice = await ProgressService.require_unlocked(user_id, difficulty, settings)
         return Exploration(
             user_id,
             user_name,
@@ -66,6 +66,7 @@ class TreasureService:
             settings[f"{difficulty}_rate"],
             settings[f"{difficulty}_max"],
             settings["test_mode"],
+            unlocked_difficulty=unlock_notice,
             settings=settings,
         )
 
