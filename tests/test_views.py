@@ -6,6 +6,7 @@ from commands.treasure import TreasureCommands
 from consts.treasure import DEFAULT_SETTINGS
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
+from services.progress_service import ProgressService
 from services.settings_service import SettingsService
 from services.treasure_service import TreasureService
 from views.admin import AdminView, SettingsModal, TestModeView
@@ -88,6 +89,11 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.enterContext(
             patch("services.treasure_service.random.randint", return_value=1)
+        )
+        self.enterContext(
+            patch.object(
+                ProgressService, "record_exploration", new=AsyncMock(return_value=None)
+            )
         )
         session = await TreasureService.create(1, "テスト", "beginner")
         view = ExplorationView(session)
