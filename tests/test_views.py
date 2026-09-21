@@ -114,7 +114,7 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("探索失敗", text)
         self.assertIn("難易度解放", text)
         self.assertIn("中級宝探し", text)
-        self.assertIsNone(session.unlocked_difficulty)
+        self.assertEqual(session.unlocked_difficulty, "intermediate")
 
     async def test_long_history_is_split_without_second_defer(self):
         event = interaction()
