@@ -1,3 +1,5 @@
+"""難易度解放システム用のユーザー探索進捗をMySQLへ保存・取得する。"""
+
 class ProgressRepository:
     @staticmethod
     async def get_progress_by_user_id(cursor, user_id):
