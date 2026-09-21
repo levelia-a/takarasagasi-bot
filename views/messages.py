@@ -27,14 +27,13 @@ def treasure_panel(settings):
 
 
 def _append_unlock_notification(text, session):
-    """条件到達通知があれば結果の成否に関係なく1回だけ追記する。"""
+    """条件到達通知があれば結果の成否に関係なく追記する。消費は送信成功後に行う。"""
     if session.unlocked_difficulty:
         unlocked = DIFFICULTIES[session.unlocked_difficulty]
         text += (
             f"\n\n🔓 **難易度解放！**\n"
             f"{unlocked['emoji']} **{unlocked['name']}宝探し** が解放されました！"
         )
-        session.unlocked_difficulty = None
     return text
 
 
