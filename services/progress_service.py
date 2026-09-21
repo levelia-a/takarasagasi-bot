@@ -53,6 +53,12 @@ class ProgressService:
                     f"中級探索：**{current}/{required}回**\nあと **{required-current}回** です。"
                 )
 
+        # 条件引き下げで既に到達済みだった場合も、最初の挑戦時に1回だけ通知する。
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            if await ProgressRepository.claim_unlock_notification(cursor, user_id, difficulty):
+                return difficulty
+        return None
+
     @staticmethod
     async def record_exploration(user_id, difficulty, exploration_id, result=None):
         """探索進捗を保存し、終了結果があれば同じトランザクションで保存する。"""
