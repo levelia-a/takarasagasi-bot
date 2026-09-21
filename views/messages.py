@@ -40,6 +40,7 @@ def exploration_text(session):
         f"✨ 成功回数：**{session.success_count}回**\n"
         f"💰 {'獲得報酬' if session.result else '現在の報酬'}：**{session.reward:,} LIA**"
     )
+    # 難易度解放システム：条件達成した探索結果に解放通知を追加する。
     if session.unlocked_difficulty:
         unlocked = DIFFICULTIES[session.unlocked_difficulty]
         text += (
@@ -65,6 +66,7 @@ def settings_text(settings):
             f"🎯 成功率：{settings[f'{key}_rate']}%\n"
             f"🔎 最大探索：{settings[f'{key}_max']}回\n\n"
         )
+    # 難易度解放システム：管理者向け設定表示にも現在の条件を載せる。
     text += (
         "🔓 **難易度解放条件**\n"
         f"🔵 中級：初級を {settings['intermediate_unlock']}回 探索\n"
