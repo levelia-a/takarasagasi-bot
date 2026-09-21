@@ -9,6 +9,7 @@ from discord.ext import commands
 from commands.treasure import TreasureCommands
 from config import Config
 from services.db_service import DbService
+from services.schema_service import SchemaService
 from services.settings_service import SettingsService
 from views.common import report_error
 from views.treasure import TreasureView
@@ -31,6 +32,7 @@ class TreasureBot(commands.Bot):
     async def setup_hook(self):
         """DB接続を開始し、コマンドと常設パネルを登録する。"""
         await DbService.connect(self.config.database)
+        await SchemaService.validate_required_tables()
         SettingsService.validate_settings(await SettingsService.get_all())
         await self.add_cog(TreasureCommands())
         self.add_view(TreasureView())
