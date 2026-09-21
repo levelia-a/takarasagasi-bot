@@ -40,6 +40,13 @@ def exploration_text(session):
         f"✨ 成功回数：**{session.success_count}回**\n"
         f"💰 {'獲得報酬' if session.result else '現在の報酬'}：**{session.reward:,} LIA**"
     )
+    if session.unlocked_difficulty:
+        unlocked = DIFFICULTIES[session.unlocked_difficulty]
+        text += (
+            f"\n\n🔓 **難易度解放！**\n"
+            f"{unlocked['emoji']} **{unlocked['name']}宝探し** が解放されました！"
+        )
+        session.unlocked_difficulty = None
     if session.result is None:
         text += "\n\n⚔️ **さらに奥へ進みますか？**\n失敗すると報酬はすべて失われます。"
     return text
@@ -58,6 +65,11 @@ def settings_text(settings):
             f"🎯 成功率：{settings[f'{key}_rate']}%\n"
             f"🔎 最大探索：{settings[f'{key}_max']}回\n\n"
         )
+    text += (
+        "🔓 **難易度解放条件**\n"
+        f"🔵 中級：初級を {settings['intermediate_unlock']}回 探索\n"
+        f"🔴 上級：中級を {settings['advanced_unlock']}回 探索\n\n"
+    )
     return text + "⚠️ 現在はLIAシステムとは未接続です。"
 
 
