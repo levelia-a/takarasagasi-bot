@@ -7,6 +7,7 @@
 
 from repositories.progress_repository import ProgressRepository
 from services.db_service import DbService
+from services.settings_service import SettingsService
 
 
 class DifficultyLocked(ValueError):
@@ -52,16 +53,22 @@ class ProgressService:
                 )
 
     @staticmethod
-    async def record_exploration(user_id, difficulty, settings):
-        """通常プレイの探索を1回記録し、今回ちょうど到達した難易度があれば返す。"""
-        async with (
-            DbService.get_connection() as connection,
-            connection.cursor() as cursor,
-        ):
-            progress = await ProgressRepository.increment_explorations(
-                cursor, user_id, difficulty
-            )
+    async def record_exploration(user_id, difficulty, exploration_id):
+        """通常プレイの探索を重複なく1回記録し、現在の条件で解放通知を判定する。"""
+        async with DbService.get_connection() as connection:
+            await connection.begin()
+            try:
+                async with connection.cursor() as cursor:
+                    progress = await ProgressRepository.increment_explorations(
+                        cursor, user_id, difficulty, exploration_id
+                    )
+                await connection.commit()
+            except BaseException:
+                await connection.rollback()
+                raise
 
+        # ゲーム開始後に管理者が条件を変更していても、通知は現在設定で判定する。
+        settings = await SettingsService.get_all()
         if (
             difficulty == "beginner"
             and progress["beginner_explorations"] == settings["intermediate_unlock"]
