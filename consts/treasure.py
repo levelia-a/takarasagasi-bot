@@ -8,6 +8,7 @@ DEFAULT_SETTINGS = {
     "advanced_price": 10000,
     "advanced_rate": 40,
     "advanced_max": 10,
+    # 難易度解放システム：初級10回で中級、中級20回で上級を解放する初期値。
     "intermediate_unlock": 10,
     "advanced_unlock": 20,
     "operation": 1,
