@@ -26,10 +26,23 @@ def treasure_panel(settings):
     return embed
 
 
+def _append_unlock_notification(text, session):
+    """条件到達通知があれば結果の成否に関係なく1回だけ追記する。"""
+    if session.unlocked_difficulty:
+        unlocked = DIFFICULTIES[session.unlocked_difficulty]
+        text += (
+            f"\n\n🔓 **難易度解放！**\n"
+            f"{unlocked['emoji']} **{unlocked['name']}宝探し** が解放されました！"
+        )
+        session.unlocked_difficulty = None
+    return text
+
+
 def exploration_text(session):
     """探索の進行状態や終了結果に応じたメッセージを作る。"""
     if session.result == "failure":
-        return f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n報酬はすべて失われます。\n\n💰 最終報酬：**0 LIA**"
+        text = f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n報酬はすべて失われます。\n\n💰 最終報酬：**0 LIA**"
+        return _append_unlock_notification(text, session)
     title = {
         "retreat": "🏠 **無事に引き返しました！**",
         "max_success": "🎉 **最大探索回数到達！**",
@@ -40,14 +53,8 @@ def exploration_text(session):
         f"✨ 成功回数：**{session.success_count}回**\n"
         f"💰 {'獲得報酬' if session.result else '現在の報酬'}：**{session.reward:,} LIA**"
     )
-    # 難易度解放システム：条件達成した探索結果に解放通知を追加する。
-    if session.unlocked_difficulty:
-        unlocked = DIFFICULTIES[session.unlocked_difficulty]
-        text += (
-            f"\n\n🔓 **難易度解放！**\n"
-            f"{unlocked['emoji']} **{unlocked['name']}宝探し** が解放されました！"
-        )
-        session.unlocked_difficulty = None
+    # 難易度解放システム：成功・撤退・最大到達にも条件達成通知を追加する。
+    text = _append_unlock_notification(text, session)
     if session.result is None:
         text += "\n\n⚔️ **さらに奥へ進みますか？**\n失敗すると報酬はすべて失われます。"
     return text
