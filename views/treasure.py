@@ -112,25 +112,30 @@ class TreasureView(BaseView):
         except DifficultyLocked as error:
             await interaction.edit_original_response(content=str(error))
             return
-        config = DIFFICULTIES[difficulty]
-        await interaction.edit_original_response(
-            content=f"{config['emoji']} **{config['name']}宝探し**\n\n🗺️ 宝の地図を手に入れた！\n\n💰 必要LIA：**{session.price:,} LIA**"
-        )
-        await asyncio.sleep(1)
-        await interaction.edit_original_response(content="🔎 **探索中……**")
-        await asyncio.sleep(1.5)
-        await TreasureService.explore(session)
-        view = ExplorationView(session) if session.result is None else None
-        message = await interaction.edit_original_response(
-            content=exploration_text(session), view=view
-        )
-        if session.unlocked_difficulty:
-            await ProgressService.mark_unlock_notification(
-                session.user_id, session.unlocked_difficulty
+        try:
+            config = DIFFICULTIES[difficulty]
+            await interaction.edit_original_response(
+                content=f"{config['emoji']} **{config['name']}宝探し**\n\n🗺️ 宝の地図を手に入れた！\n\n💰 必要LIA：**{session.price:,} LIA**"
             )
-            session.unlocked_difficulty = None
-        if view:
-            view.message = message
+            await asyncio.sleep(1)
+            await interaction.edit_original_response(content="🔎 **探索中……**")
+            await asyncio.sleep(1.5)
+            await TreasureService.explore(session)
+            view = ExplorationView(session) if session.result is None else None
+            message = await interaction.edit_original_response(
+                content=exploration_text(session), view=view
+            )
+            if session.unlocked_difficulty:
+                await ProgressService.mark_unlock_notification(
+                    session.user_id, session.unlocked_difficulty
+                )
+                session.unlocked_difficulty = None
+            if view:
+                view.message = message
+
+        except BaseException:
+            await TreasureService.release_user(session.user_id)
+            raise
 
     @discord.ui.button(
         label="初級宝探し",
