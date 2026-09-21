@@ -47,6 +47,41 @@ class SettingsModal(AdminOnlyModal):
         )
 
 
+class UnlockSettingsModal(AdminOnlyModal):
+    def __init__(self):
+        super().__init__(title="🔓 難易度解放設定")
+        self.intermediate = discord.ui.TextInput(
+            label="中級解放までの初級探索回数", placeholder="10", required=True
+        )
+        self.advanced = discord.ui.TextInput(
+            label="上級解放までの中級探索回数", placeholder="20", required=True
+        )
+        self.add_item(self.intermediate)
+        self.add_item(self.advanced)
+
+    async def on_submit(self, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await SettingsService.update(
+                {
+                    "intermediate_unlock": int(self.intermediate.value),
+                    "advanced_unlock": int(self.advanced.value),
+                },
+                interaction.user.id,
+                str(interaction.user),
+                "難易度解放設定変更",
+            )
+        except ValueError as error:
+            await interaction.edit_original_response(
+                content=f"❌ 入力値を確認してください。\n{error}"
+            )
+            return
+        await interaction.edit_original_response(
+            content="✅ 難易度解放条件を変更しました。\n\n"
+            + settings_text(await SettingsService.get_all())
+        )
+
+
 class TestModeView(AdminOnlyView):
     def __init__(self):
         """テストモードを選ぶボタンを初期化する。"""
@@ -200,6 +235,13 @@ class AdminView(AdminOnlyView):
             view=DeleteTestView(),
             ephemeral=True,
         )
+
+    @discord.ui.button(
+        label="解放条件", emoji="🔓", style=discord.ButtonStyle.primary, row=4
+    )
+    async def unlock_button(self, interaction, button):
+        """難易度の解放に必要な探索回数を変更する。"""
+        await interaction.response.send_modal(UnlockSettingsModal())
 
     @discord.ui.button(
         label="管理ログ", emoji="🔐", style=discord.ButtonStyle.secondary, row=3
