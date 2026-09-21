@@ -74,21 +74,22 @@ class ProgressService:
 
         # ゲーム開始後に管理者が条件を変更していても、通知は現在設定で判定する。
         settings = await SettingsService.get_all()
+        unlocked = None
         if (
             difficulty == "beginner"
             and progress["beginner_explorations"] >= settings["intermediate_unlock"]
         ):
             async with DbService.get_connection() as connection, connection.cursor() as cursor:
                 if await ProgressRepository.claim_unlock_notification(cursor, user_id, "intermediate"):
-                    return "intermediate"
-        if (
+                    unlocked = "intermediate"
+        elif (
             difficulty == "intermediate"
             and progress["intermediate_explorations"] >= settings["advanced_unlock"]
         ):
             async with DbService.get_connection() as connection, connection.cursor() as cursor:
                 if await ProgressRepository.claim_unlock_notification(cursor, user_id, "advanced"):
-                    return "advanced"
-        return None
+                    unlocked = "advanced"
+        return unlocked
 
 
     @staticmethod
