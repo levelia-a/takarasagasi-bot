@@ -15,7 +15,7 @@ class DifficultyLocked(ValueError):
 
 class ProgressService:
     @staticmethod
-    async def get(user_id):
+    async def get_exploration_counts(user_id):
         """ユーザーの探索回数を取得する。未記録なら0回として扱う。"""
         async with (
             DbService.get_connection() as connection,
@@ -33,7 +33,7 @@ class ProgressService:
         if difficulty == "beginner":
             return
 
-        progress = await ProgressService.get(user_id)
+        progress = await ProgressService.get_exploration_counts(user_id)
         if difficulty == "intermediate":
             current = progress["beginner_explorations"]
             required = settings["intermediate_unlock"]
