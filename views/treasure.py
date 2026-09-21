@@ -3,8 +3,8 @@ import asyncio
 import discord
 
 from consts.treasure import DIFFICULTIES
-from services.progress_service import DifficultyLocked
-from services.treasure_service import TreasureService, TreasureStopped
+from services.progress_service import DifficultyLocked, ProgressService
+from services.treasure_service import TreasureAlreadyActive, TreasureService, TreasureStopped
 from views.common import BaseView
 from views.messages import exploration_text
 
@@ -52,7 +52,11 @@ class ExplorationView(BaseView):
             await interaction.edit_original_response(
                 content=exploration_text(self.session), view=view
             )
-            self.session.unlocked_difficulty = None
+            if self.session.unlocked_difficulty:
+                await ProgressService.mark_unlock_notification(
+                    self.session.user_id, self.session.unlocked_difficulty
+                )
+                self.session.unlocked_difficulty = None
         finally:
             self.busy = False
 
@@ -77,7 +81,8 @@ class ExplorationView(BaseView):
         await self.act(interaction, False)
 
     async def on_timeout(self):
-        """操作期限が切れた画面からボタンを取り除く。"""
+        """操作期限が切れた画面からボタンを取り除き、開始ロックを解放する。"""
+        await TreasureService.release_user(self.session.user_id)
         if self.message is not None:
             try:
                 await self.message.edit(
@@ -100,7 +105,7 @@ class TreasureView(BaseView):
             session = await TreasureService.create(
                 interaction.user.id, str(interaction.user), difficulty
             )
-        except TreasureStopped as error:
+        except (TreasureStopped, TreasureAlreadyActive) as error:
             await interaction.edit_original_response(content=f"🔴 {error}")
             return
         # 難易度解放システム：未解放なら本人だけに現在の進捗を表示する。
@@ -119,7 +124,11 @@ class TreasureView(BaseView):
         message = await interaction.edit_original_response(
             content=exploration_text(session), view=view
         )
-        session.unlocked_difficulty = None
+        if session.unlocked_difficulty:
+            await ProgressService.mark_unlock_notification(
+                session.user_id, session.unlocked_difficulty
+            )
+            session.unlocked_difficulty = None
         if view:
             view.message = message
 
