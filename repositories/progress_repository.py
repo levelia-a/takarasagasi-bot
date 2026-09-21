@@ -13,8 +13,8 @@ class ProgressRepository:
         return await cursor.fetchone()
 
     @staticmethod
-    async def increment_explorations(cursor, user_id, difficulty):
-        """指定難易度の探索回数を1増やし、更新後の進捗を返す。"""
+    async def increment_explorations(cursor, user_id, difficulty, exploration_id):
+        """同じ探索IDを二重加算せず、指定難易度の探索回数を1増やす。"""
         column = {
             "beginner": "beginner_explorations",
             "intermediate": "intermediate_explorations",
@@ -23,8 +23,14 @@ class ProgressRepository:
             return await ProgressRepository.get_progress_by_user_id(cursor, user_id)
 
         await cursor.execute(
-            f"""INSERT INTO user_progress (user_id, {column}) VALUES (%s, 1)
-                ON DUPLICATE KEY UPDATE {column} = {column} + 1""",
-            (user_id,),
+            """INSERT IGNORE INTO user_progress_events (exploration_id, user_id)
+               VALUES (%s, %s)""",
+            (exploration_id, user_id),
         )
+        if cursor.rowcount:
+            await cursor.execute(
+                f"""INSERT INTO user_progress (user_id, {column}) VALUES (%s, 1)
+                    ON DUPLICATE KEY UPDATE {column} = {column} + 1""",
+                (user_id,),
+            )
         return await ProgressRepository.get_progress_by_user_id(cursor, user_id)
