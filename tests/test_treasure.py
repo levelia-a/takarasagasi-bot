@@ -140,15 +140,31 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_save_retries_same_result_without_reroll(self):
         session = await self.create()
         self.roll = 100
-        self.results.insert_statistics_record_if_session_id_not_exists.side_effect = [
+        self.progress.side_effect = [
             RuntimeError("connection lost"),
             None,
         ]
+
         with self.assertRaises(RuntimeError):
             await TreasureService.explore(session)
+
+        self.assertEqual((session.result, session.exploration_count), ("failure", 1))
+        exploration_id = session.pending_exploration_id
+        self.assertIsNotNone(exploration_id)
+
+        # 再試行時に乱数を成功側へ変えても、保存済みの失敗結果を再抽選しない。
         self.roll = 1
         await TreasureService.explore(session)
+
         self.assertEqual((session.result, session.exploration_count), ("failure", 1))
+        self.assertIsNone(session.pending_exploration_id)
+        self.assertEqual(self.progress.await_count, 2)
+        first = self.progress.await_args_list[0].args
+        second = self.progress.await_args_list[1].args
+        self.assertEqual(first[2], exploration_id)
+        self.assertEqual(second[2], exploration_id)
+        self.assertEqual(first[3]["result"], "failure")
+        self.assertEqual(second[3]["result"], "failure")
 
     async def test_concurrent_end_operations_do_not_change_result(self):
         self.values["beginner_max"] = 1
