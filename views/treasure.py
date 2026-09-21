@@ -52,6 +52,7 @@ class ExplorationView(BaseView):
             await interaction.edit_original_response(
                 content=exploration_text(self.session), view=view
             )
+            self.session.unlocked_difficulty = None
         finally:
             self.busy = False
 
@@ -118,6 +119,7 @@ class TreasureView(BaseView):
         message = await interaction.edit_original_response(
             content=exploration_text(session), view=view
         )
+        session.unlocked_difficulty = None
         if view:
             view.message = message
 
