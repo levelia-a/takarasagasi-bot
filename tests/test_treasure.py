@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from consts.treasure import DEFAULT_SETTINGS
 from services.db_service import DbService
+from services.progress_service import ProgressService
 from services.settings_service import SettingsService
 from services.treasure_service import TreasureService, TreasureStopped
 
@@ -35,6 +36,14 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.enterContext(
             patch("services.treasure_service.ResultRepository", self.results)
+        )
+        # この単体テストでは進捗保存を分離し、宝探し本体の状態遷移だけを検証する。
+        self.progress = self.enterContext(
+            patch.object(
+                ProgressService,
+                "record_exploration",
+                new=AsyncMock(return_value=None),
+            )
         )
         self.enterContext(
             patch(
