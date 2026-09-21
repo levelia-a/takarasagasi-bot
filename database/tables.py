@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS statistics (
     INDEX idx_statistics_test_difficulty (is_test, difficulty)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 難易度解放システム：ユーザーごとの探索回数を永続化する。
 CREATE TABLE IF NOT EXISTS user_progress (
     user_id BIGINT UNSIGNED PRIMARY KEY,
     beginner_explorations INT UNSIGNED NOT NULL DEFAULT 0,
