@@ -54,7 +54,7 @@ cp .env.example .env
 
 宝探しBot専用のMySQLデータベースを用意し、RailwayのMySQLターミナルで
 `database/tables.py` の `TABLES_SQL` 内のSQLを手動実行してください。
-作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`admin_logs` の5つです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` は同じ探索を再試行した際の二重加算を防ぐため、探索単位のIDを保存します。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
+作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`unlock_notifications`・`admin_logs` の6つです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` はDB確定結果が不明な再試行で二重加算を防ぐため探索単位のIDを一時保存し、正常完了後に削除します。`unlock_notifications` は解放判定には使わず、同じ解放通知を繰り返さないためだけに使用します。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
 その後、`.env` に接続情報を設定してください。
 他BotのDBには接続しないでください。`settings` など汎用名のテーブルを使用します。
 
@@ -126,9 +126,14 @@ Bot側に `DISCORD_TOKEN`、`GUILD_ID`、`MYSQLHOST`・`MYSQLPORT`・`MYSQLUSER`
 `GUILD_ID` は省略可能です。MySQL接続には個別設定の代わりに `MYSQL_URL` も使用できます（指定時は優先）。
 `railway.json` の起動コマンドは `python -X pycache_prefix=.cache/pycache main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
-デプロイ前に `database/tables.py` のSQLでテーブルを手動作成してください。
+デプロイ前に必ず `database/tables.py` のSQLを先に実行し、6テーブルが存在することを確認してからBotコードを更新してください。スキーマ未更新のまま新コードを起動しないでください。
 コマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
 
 起動しない場合はRailwayのBuild Logsで依存関係の導入、Deploy Logsで必須変数・MySQL接続・テーブル権限・Discord認証・コマンド同期を確認してください。
 
 実装参照: [discord.py](https://discordpy.readthedocs.io/en/stable/ext/commands/api.html)、[aiomysql](https://github.com/aio-libs/aiomysql)。
+
+
+## CI
+
+Pull RequestではGitHub ActionsがPython 3.12とMySQL 8を起動し、通常の単体テストとMySQL結合テストをまとめて実行します。ローカルでMySQL URLを用意できない場合でも、PR上ではDB関連テストをskipせず確認します。
