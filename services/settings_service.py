@@ -16,6 +16,9 @@ class SettingsService:
             raise ValueError("不明なテストモードです。")
         if settings["operation"] not in (0, 1):
             raise ValueError("運営状態は0または1で指定してください。")
+        for unlock_key in ("intermediate_unlock", "advanced_unlock"):
+            if not 1 <= settings[unlock_key] <= 1000000:
+                raise ValueError("解放条件は1〜1,000,000回にしてください。")
         for key in DIFFICULTIES:
             price, rate, maximum = (
                 settings[f"{key}_{suffix}"] for suffix in ("price", "rate", "max")
