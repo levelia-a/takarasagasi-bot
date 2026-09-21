@@ -53,7 +53,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            for table in ("admin_logs", "statistics", "settings"):
+            for table in ("admin_logs", "user_progress", "statistics", "settings"):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -75,7 +75,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await SettingsService.update(
             {"test_mode": "always_fail"}, 1, "admin", "テスト変更"
         )
-        test_session = await TreasureService.create(2, "test", "advanced")
+        # テストモードは解放進捗を増やさないが、未解放難易度の開始制限は有効。
+        test_session = await TreasureService.create(2, "test", "beginner")
         await TreasureService.explore(test_session)
         summary = await AdminService.statistics()
         self.assertEqual(
@@ -84,6 +85,40 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await AdminService.delete_test(1, "admin"), 1)
         self.assertEqual(len(await AdminService.history()), 1)
         self.assertEqual(len(await AdminService.admin_logs()), 3)
+
+    async def test_difficulty_unlock_is_permanent_after_threshold_change(self):
+        user_id = 1545489116127559683
+        await SettingsService.update(
+            {"intermediate_unlock": 1}, 1, "admin", "解放条件変更"
+        )
+        session = await TreasureService.create(user_id, "unlock-test", "beginner")
+        await TreasureService.explore(session)
+
+        # 一度解放した後に必要回数を引き上げても再ロックされない。
+        await SettingsService.update(
+            {"intermediate_unlock": 100}, 1, "admin", "解放条件変更"
+        )
+        unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
+        self.assertEqual(unlocked.difficulty, "intermediate")
+
+    async def test_test_mode_does_not_increment_unlock_progress(self):
+        await SettingsService.update(
+            {"test_mode": "always_success", "intermediate_unlock": 1},
+            1,
+            "admin",
+            "テスト変更",
+        )
+        session = await TreasureService.create(999, "test", "beginner")
+        await TreasureService.explore(session)
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute(
+                "SELECT beginner_explorations FROM user_progress WHERE user_id = %s",
+                (999,),
+            )
+            self.assertIsNone(await cursor.fetchone())
 
     async def test_setting_and_log_rollback_together(self):
         with self.assertRaises(IntegrityError):
