@@ -13,6 +13,7 @@ from repositories.progress_repository import ProgressRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
 from services.progress_service import ProgressService
+from services.schema_service import SchemaService
 from services.settings_service import SettingsService
 from services.treasure_service import TreasureService
 
@@ -26,6 +27,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             config = DatabaseConfig.from_env()
         await DbService.connect(config)
         self.addAsyncCleanup(DbService.close)
+        TreasureService._active_users = set()
+        TreasureService._active_users_lock = asyncio.Lock()
         # 既存DBを破壊しない。テスト用の空DBだけを受け付ける。
         async with (
             DbService.get_connection() as connection,
@@ -119,24 +122,26 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             {"beginner_max": 3}, 1, "admin", "最大探索変更"
         )
         session = await TreasureService.create(user_id, "retry-test", "beginner")
-        original_delete = ProgressRepository.delete_progress_event
+        original_record = ProgressService.record_exploration
         calls = 0
 
-        async def fail_cleanup_once(cursor, exploration_id):
+        async def lose_response_after_commit(*args, **kwargs):
             nonlocal calls
+            result = await original_record(*args, **kwargs)
             calls += 1
             if calls == 1:
-                raise RuntimeError("commit後の後処理失敗を再現")
-            return await original_delete(cursor, exploration_id)
+                # DBのCOMMITは成功したが、Botが成功応答を受け取れなかった状況。
+                raise RuntimeError("commit成功後に通信断")
+            return result
 
         with patch.object(
-            ProgressRepository, "delete_progress_event", side_effect=fail_cleanup_once
+            ProgressService, "record_exploration", side_effect=lose_response_after_commit
         ):
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
             self.assertEqual(session.exploration_count, 1)
 
-            # 同じ探索IDの保存だけを再試行し、抽選・進捗加算は重複させない。
+            # 同じ探索IDを再送しても、永続化した冪等性キーにより二重加算しない。
             await TreasureService.explore(session)
             await TreasureService.explore(session)
             await TreasureService.explore(session)
@@ -147,6 +152,15 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.result, "max_success")
         progress = await ProgressService.get_exploration_counts(user_id)
         self.assertEqual(progress["beginner_explorations"], 3)
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute(
+                "SELECT COUNT(*) AS count FROM user_progress_events WHERE user_id = %s",
+                (user_id,),
+            )
+            self.assertEqual((await cursor.fetchone())["count"], 3)
 
     async def test_unlock_notification_uses_current_settings(self):
         user_id = 1545489116127559685
@@ -261,6 +275,18 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(states, [0, 1] * 4)
         self.assertEqual((await SettingsService.get_all())["operation"], 1)
         self.assertEqual(len(await AdminService.admin_logs()), 8)
+
+    async def test_schema_validation_rejects_old_database_before_gameplay(self):
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute("DROP TABLE unlock_notifications")
+            await cursor.execute("DROP TABLE user_progress_events")
+            await cursor.execute("DROP TABLE user_progress")
+
+        with self.assertRaisesRegex(RuntimeError, "不足テーブル"):
+            await SchemaService.validate_required_tables()
 
     async def test_read_connection_uses_autocommit_without_transaction(self):
         async with (
