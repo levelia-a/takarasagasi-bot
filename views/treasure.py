@@ -3,6 +3,7 @@ import asyncio
 import discord
 
 from consts.treasure import DIFFICULTIES
+from services.progress_service import DifficultyLocked
 from services.treasure_service import TreasureService, TreasureStopped
 from views.common import BaseView
 from views.messages import exploration_text
@@ -100,6 +101,9 @@ class TreasureView(BaseView):
             )
         except TreasureStopped as error:
             await interaction.edit_original_response(content=f"🔴 {error}")
+            return
+        except DifficultyLocked as error:
+            await interaction.edit_original_response(content=str(error))
             return
         config = DIFFICULTIES[difficulty]
         await interaction.edit_original_response(
