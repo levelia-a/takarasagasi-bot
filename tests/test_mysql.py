@@ -9,6 +9,7 @@ from config import DatabaseConfig
 from consts.treasure import DEFAULT_SETTINGS
 from database.tables import TABLES_SQL
 from repositories.settings_repository import SettingsRepository
+from repositories.progress_repository import ProgressRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
 from services.progress_service import ProgressService
@@ -118,24 +119,24 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             {"beginner_max": 3}, 1, "admin", "最大探索変更"
         )
         session = await TreasureService.create(user_id, "retry-test", "beginner")
-        original = ProgressService.record_exploration
+        original_delete = ProgressRepository.delete_progress_event
         calls = 0
 
-        async def save_then_fail_once(*args, **kwargs):
+        async def fail_cleanup_once(cursor, exploration_id):
             nonlocal calls
-            result = await original(*args, **kwargs)
             calls += 1
             if calls == 1:
-                raise RuntimeError("保存後の通信失敗を再現")
-            return result
+                raise RuntimeError("commit後の後処理失敗を再現")
+            return await original_delete(cursor, exploration_id)
 
         with patch.object(
-            ProgressService, "record_exploration", side_effect=save_then_fail_once
+            ProgressRepository, "delete_progress_event", side_effect=fail_cleanup_once
         ):
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
             self.assertEqual(session.exploration_count, 1)
 
+            # 同じ探索IDの保存だけを再試行し、抽選・進捗加算は重複させない。
             await TreasureService.explore(session)
             await TreasureService.explore(session)
             await TreasureService.explore(session)
