@@ -1,3 +1,9 @@
+"""難易度解放システム。
+
+初級は最初から解放し、初級の探索回数で中級、中級の探索回数で上級を解放する。
+解放に必要な回数は管理者設定から変更できる。
+"""
+
 from repositories.progress_repository import ProgressRepository
 from services.db_service import DbService
 
@@ -18,6 +24,7 @@ class ProgressService:
 
     @staticmethod
     async def require_unlocked(user_id, difficulty, settings):
+        """開始前に難易度の解放状態を確認し、未解放なら残り回数を通知する。"""
         if difficulty == "beginner":
             return
         progress = await ProgressService.get(user_id)
@@ -38,6 +45,7 @@ class ProgressService:
 
     @staticmethod
     async def record_exploration(user_id, difficulty, settings):
+        """通常プレイの探索を1回記録し、今回解放された難易度があれば返す。"""
         async with (
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
