@@ -11,6 +11,7 @@ from database.tables import TABLES_SQL
 from repositories.settings_repository import SettingsRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
+from services.progress_service import ProgressService
 from services.settings_service import SettingsService
 from services.treasure_service import TreasureService
 
@@ -53,7 +54,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            for table in ("admin_logs", "user_progress", "statistics", "settings"):
+            for table in ("admin_logs", "user_progress_events", "user_progress", "statistics", "settings"):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -110,6 +111,60 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await TreasureService.explore(session)
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
+
+    async def test_progress_save_retry_does_not_double_count_or_skip_reward(self):
+        user_id = 1545489116127559684
+        await SettingsService.update(
+            {"beginner_max": 3}, 1, "admin", "最大探索変更"
+        )
+        session = await TreasureService.create(user_id, "retry-test", "beginner")
+        original = ProgressService.record_exploration
+        calls = 0
+
+        async def save_then_fail_once(*args, **kwargs):
+            nonlocal calls
+            result = await original(*args, **kwargs)
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("保存後の通信失敗を再現")
+            return result
+
+        with patch.object(
+            ProgressService, "record_exploration", side_effect=save_then_fail_once
+        ):
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+            self.assertEqual(session.exploration_count, 0)
+
+            await TreasureService.explore(session)
+            await TreasureService.explore(session)
+            await TreasureService.explore(session)
+
+        self.assertEqual(session.exploration_count, 3)
+        self.assertEqual(session.success_count, 3)
+        self.assertEqual(session.reward, 8000)
+        self.assertEqual(session.result, "max_success")
+        progress = await ProgressService.get_exploration_counts(user_id)
+        self.assertEqual(progress["beginner_explorations"], 3)
+
+    async def test_unlock_notification_uses_current_settings(self):
+        user_id = 1545489116127559685
+        await SettingsService.update(
+            {"intermediate_unlock": 1}, 1, "admin", "解放条件変更"
+        )
+        session = await TreasureService.create(user_id, "settings-test", "beginner")
+
+        # 開始後に条件が1回→2回へ変わった場合、1回目では通知しない。
+        await SettingsService.update(
+            {"intermediate_unlock": 2}, 1, "admin", "解放条件変更"
+        )
+        await TreasureService.explore(session)
+        self.assertIsNone(session.unlocked_difficulty)
+
+        # 現在条件の2回目に到達した時点で通知対象になる。
+        session = await TreasureService.create(user_id, "settings-test", "beginner")
+        await TreasureService.explore(session)
+        self.assertEqual(session.unlocked_difficulty, "intermediate")
 
     async def test_test_mode_does_not_increment_unlock_progress(self):
         await SettingsService.update(
