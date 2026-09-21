@@ -8,6 +8,8 @@ DEFAULT_SETTINGS = {
     "advanced_price": 10000,
     "advanced_rate": 40,
     "advanced_max": 10,
+    "intermediate_unlock": 10,
+    "advanced_unlock": 20,
     "operation": 1,
     "test_mode": "normal",
 }
