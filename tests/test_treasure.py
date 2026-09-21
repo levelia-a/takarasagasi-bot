@@ -6,7 +6,7 @@ from consts.treasure import DEFAULT_SETTINGS
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.settings_service import SettingsService
-from services.treasure_service import TreasureService, TreasureStopped
+from services.treasure_service import TreasureAlreadyActive, TreasureService, TreasureStopped
 
 
 class TreasureTests(unittest.IsolatedAsyncioTestCase):
@@ -27,6 +27,8 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.connection.commit = AsyncMock()
         self.connection.rollback = AsyncMock()
         self.roll = 1
+        TreasureService._active_users = set()
+        TreasureService._active_users_lock = asyncio.Lock()
         self.enterContext(
             patch.object(DbService, "get_connection", self.db.get_connection)
         )
@@ -131,6 +133,15 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                 await TreasureService.explore(session)
                 self.assertEqual(session.result, result)
                 self.assertTrue(session.is_test)
+
+    async def test_same_user_cannot_start_second_active_session(self):
+        session = await self.create()
+        with self.assertRaises(TreasureAlreadyActive):
+            await self.create()
+        await TreasureService.retreat(session)
+        restarted = await self.create()
+        self.assertEqual(restarted.user_id, session.user_id)
+        await TreasureService.retreat(restarted)
 
     async def test_operation_off_blocks_start(self):
         self.values["operation"] = 0
