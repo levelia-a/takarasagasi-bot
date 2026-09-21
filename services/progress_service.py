@@ -94,11 +94,3 @@ class ProgressService:
             await ProgressRepository.delete_progress_event(cursor, exploration_id)
         return unlocked
 
-
-    @staticmethod
-    async def acknowledge_exploration(exploration_id):
-        """Discordへの結果表示後、再試行用イベントを削除する。"""
-        if exploration_id is None:
-            return
-        async with DbService.get_connection() as connection, connection.cursor() as cursor:
-            await ProgressRepository.delete_progress_event(cursor, exploration_id)
