@@ -78,11 +78,17 @@ class TreasureService:
                 return session
             session.exploration_count += 1
             # 難易度解放システム：実際の探索判定ごとに1回加算する。
+            # 保存に失敗した場合は同じ探索番号を再試行し、DB側の探索IDで二重加算を防ぐ。
             # 管理者のテストモードではユーザー進捗を増やさない。
             if not session.is_test:
-                unlocked = await ProgressService.record_exploration(
-                    session.user_id, session.difficulty, session.settings
-                )
+                exploration_id = f"{session.id}:{session.exploration_count}"
+                try:
+                    unlocked = await ProgressService.record_exploration(
+                        session.user_id, session.difficulty, exploration_id
+                    )
+                except BaseException:
+                    session.exploration_count -= 1
+                    raise
                 if unlocked:
                     session.unlocked_difficulty = unlocked
             success = session.test_mode == "always_success" or (
