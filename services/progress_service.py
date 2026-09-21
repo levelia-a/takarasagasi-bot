@@ -20,7 +20,12 @@ class ProgressService:
             connection.cursor() as cursor,
         ):
             row = await ProgressRepository.get_progress_by_user_id(cursor, user_id)
-        return row or {"beginner_explorations": 0, "intermediate_explorations": 0}
+        return row or {
+            "beginner_explorations": 0,
+            "intermediate_explorations": 0,
+            "intermediate_unlocked": 0,
+            "advanced_unlocked": 0,
+        }
 
     @staticmethod
     async def require_unlocked(user_id, difficulty, settings):
@@ -28,6 +33,10 @@ class ProgressService:
         if difficulty == "beginner":
             return
         progress = await ProgressService.get(user_id)
+        if difficulty == "intermediate" and progress["intermediate_unlocked"]:
+            return
+        if difficulty == "advanced" and progress["advanced_unlocked"]:
+            return
         if difficulty == "intermediate":
             current, required = progress["beginner_explorations"], settings["intermediate_unlock"]
             if current < required:
@@ -53,8 +62,26 @@ class ProgressService:
             progress = await ProgressRepository.increment_explorations(
                 cursor, user_id, difficulty
             )
-        if difficulty == "beginner" and progress["beginner_explorations"] == settings["intermediate_unlock"]:
+        if (
+            difficulty == "beginner"
+            and not progress["intermediate_unlocked"]
+            and progress["beginner_explorations"] >= settings["intermediate_unlock"]
+        ):
+            async with (
+                DbService.get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await ProgressRepository.mark_unlocked(cursor, user_id, "intermediate")
             return "intermediate"
-        if difficulty == "intermediate" and progress["intermediate_explorations"] == settings["advanced_unlock"]:
+        if (
+            difficulty == "intermediate"
+            and not progress["advanced_unlocked"]
+            and progress["intermediate_explorations"] >= settings["advanced_unlock"]
+        ):
+            async with (
+                DbService.get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
+                await ProgressRepository.mark_unlocked(cursor, user_id, "advanced")
             return "advanced"
         return None
