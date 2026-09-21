@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS user_progress_events (
     INDEX idx_user_progress_events_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 解放判定そのものではなく、Discordへ同じ解放通知を繰り返さないための状態。
+CREATE TABLE IF NOT EXISTS unlock_notifications (
+    user_id BIGINT UNSIGNED NOT NULL,
+    difficulty VARCHAR(32) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, difficulty)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS admin_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     admin_id BIGINT UNSIGNED NOT NULL,
