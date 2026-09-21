@@ -53,9 +53,11 @@ class ProgressService:
                     f"中級探索：**{current}/{required}回**\nあと **{required-current}回** です。"
                 )
 
-        # 条件引き下げで既に到達済みだった場合も、最初の挑戦時に1回だけ通知する。
+        # 条件引き下げで既に到達済みでも、未表示なら次の挑戦画面で通知する。
         async with DbService.get_connection() as connection, connection.cursor() as cursor:
-            if await ProgressRepository.claim_unlock_notification(cursor, user_id, difficulty):
+            if not await ProgressRepository.has_unlock_notification(
+                cursor, user_id, difficulty
+            ):
                 return difficulty
         return None
 
@@ -85,18 +87,33 @@ class ProgressService:
             difficulty == "beginner"
             and progress["beginner_explorations"] >= settings["intermediate_unlock"]
         ):
-            async with DbService.get_connection() as connection, connection.cursor() as cursor:
-                if await ProgressRepository.claim_unlock_notification(cursor, user_id, "intermediate"):
-                    unlocked = "intermediate"
+            target = "intermediate"
         elif (
             difficulty == "intermediate"
             and progress["intermediate_explorations"] >= settings["advanced_unlock"]
         ):
+            target = "advanced"
+        else:
+            target = None
+
+        if target is not None:
             async with DbService.get_connection() as connection, connection.cursor() as cursor:
-                if await ProgressRepository.claim_unlock_notification(cursor, user_id, "advanced"):
-                    unlocked = "advanced"
-        # 正常完了した探索の再試行用IDは不要なので、その場で削除して肥大化を防ぐ。
-        async with DbService.get_connection() as connection, connection.cursor() as cursor:
-            await ProgressRepository.delete_progress_event(cursor, exploration_id)
+                if not await ProgressRepository.has_unlock_notification(
+                    cursor, user_id, target
+                ):
+                    unlocked = target
+
+        # user_progress_events は冪等性キーなので正常完了後も保持する。
+        # DB応答を失った再試行でも同じ exploration_id を二重加算しないため削除しない。
         return unlocked
+
+    @staticmethod
+    async def mark_unlock_notification(user_id, difficulty):
+        """Discordへの通知表示が成功した後だけ通知済み状態を保存する。"""
+        if difficulty is None:
+            return
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await ProgressRepository.mark_unlock_notification(
+                cursor, user_id, difficulty
+            )
 
