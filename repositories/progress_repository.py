@@ -37,19 +37,20 @@ class ProgressRepository:
         return await ProgressRepository.get_progress_by_user_id(cursor, user_id), counted
 
     @staticmethod
-    async def claim_unlock_notification(cursor, user_id, difficulty):
-        """難易度ごとの解放通知を未通知の場合だけ1回取得する。"""
+    async def has_unlock_notification(cursor, user_id, difficulty):
+        """Discordへ表示済みの解放通知か確認する。"""
+        await cursor.execute(
+            """SELECT 1 FROM unlock_notifications
+               WHERE user_id = %s AND difficulty = %s""",
+            (user_id, difficulty),
+        )
+        return await cursor.fetchone() is not None
+
+    @staticmethod
+    async def mark_unlock_notification(cursor, user_id, difficulty):
+        """Discordへの表示成功後に通知済みとして記録する。"""
         await cursor.execute(
             """INSERT IGNORE INTO unlock_notifications (user_id, difficulty)
                VALUES (%s, %s)""",
             (user_id, difficulty),
-        )
-        return bool(cursor.rowcount)
-
-    @staticmethod
-    async def delete_progress_event(cursor, exploration_id):
-        """画面表示まで完了した探索の重複防止レコードを削除する。"""
-        await cursor.execute(
-            "DELETE FROM user_progress_events WHERE exploration_id = %s",
-            (exploration_id,),
         )
