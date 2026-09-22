@@ -52,6 +52,10 @@ class ExplorationView(BaseView):
             await interaction.edit_original_response(
                 content=exploration_text(self.session), view=view
             )
+            if self.session.result is not None:
+                await TreasureService.release_user(
+                    self.session.user_id, self.session.id
+                )
             if self.session.unlocked_difficulty:
                 await ProgressService.mark_unlock_notification(
                     self.session.user_id, self.session.unlocked_difficulty
@@ -140,6 +144,7 @@ class TreasureView(BaseView):
                 view.message = message
             else:
                 view.stop()
+                await TreasureService.release_user(session.user_id, session.id)
 
         except BaseException:
             # Viewを表示する前の失敗だけ開始枠を解放する。
