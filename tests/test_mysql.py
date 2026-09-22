@@ -27,8 +27,6 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             config = DatabaseConfig.from_env()
         await DbService.connect(config)
         self.addAsyncCleanup(DbService.close)
-        TreasureService._active_users = set()
-        TreasureService._active_users_lock = asyncio.Lock()
         # 既存DBを破壊しない。テスト用の空DBだけを受け付ける。
         async with (
             DbService.get_connection() as connection,
@@ -58,7 +56,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            for table in ("admin_logs", "unlock_notifications", "user_progress_events", "user_progress", "statistics", "settings"):
+            for table in ("admin_logs", "active_explorations", "unlock_notifications", "user_progress_events", "user_progress", "statistics", "settings"):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -71,6 +69,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         )
         await TreasureService.explore(session)
         await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
         await TreasureService.save_result(session)
         rows = await AdminService.history()
         self.assertEqual(len(rows), 1)
@@ -99,11 +98,13 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         session = await TreasureService.create(user_id, "unlock-test", "beginner")
         await TreasureService.explore(session)
         await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
 
         # 初級探索1回・条件1回なら中級に挑戦できる。
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
         await TreasureService.retreat(unlocked)
+        await TreasureService.release_user(unlocked.user_id, unlocked.id)
 
         # 条件を2回へ引き上げると、探索回数1回では再び未達になる。
         await SettingsService.update(
@@ -116,8 +117,20 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         session = await TreasureService.create(user_id, "unlock-test", "beginner")
         await TreasureService.explore(session)
         await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
         unlocked = await TreasureService.create(user_id, "unlock-test", "intermediate")
         self.assertEqual(unlocked.difficulty, "intermediate")
+
+    async def test_database_claim_blocks_same_user_across_service_calls(self):
+        user_id = 1545489116127559691
+        first = await TreasureService.create(user_id, "claim-test", "beginner")
+        with self.assertRaises(Exception) as caught:
+            await TreasureService.create(user_id, "claim-test", "beginner")
+        self.assertIn("進行中", str(caught.exception))
+        await TreasureService.release_user(first.user_id, first.id)
+        second = await TreasureService.create(user_id, "claim-test", "beginner")
+        self.assertNotEqual(first.id, second.id)
+        await TreasureService.release_user(second.user_id, second.id)
 
     async def test_progress_save_retry_does_not_double_count_or_skip_reward(self):
         user_id = 1545489116127559684
@@ -209,6 +222,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await TreasureService.explore(session)
         self.assertIsNone(session.unlocked_difficulty)
         await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
 
         # 現在条件の2回目に到達した時点で通知対象になる。
         session = await TreasureService.create(user_id, "settings-test", "beginner")
@@ -246,6 +260,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             session = await TreasureService.create(user_id, "lower-test", "beginner")
             for _ in range(5):
                 await TreasureService.explore(session)
+            await TreasureService.release_user(session.user_id, session.id)
 
         await SettingsService.update(
             {"intermediate_unlock": 10}, 1, "admin", "解放条件変更"
