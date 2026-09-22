@@ -29,6 +29,46 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rankings_aggregate_and_persist_panel(self):
+        from services.ranking_service import RankingService
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for sid, uid, successes, reward, test in (
+                ('r1', 1, 2, 100, 0), ('r2', 1, 3, 0, 0),
+                ('r3', 2, 5, 200, 0), ('r4', 1, 99, 9999, 1),
+            ):
+                result = dict(session_id=sid, user_id=uid, user_name='test',
+                              difficulty='初級', start_price=1000, success_count=successes,
+                              final_reward=reward, result='retreat' if reward else 'failure',
+                              failure_point=None, is_test=test)
+                await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, result)
+                await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, result)
+        snapshot = await RankingService.refresh()
+        success = [e for e in snapshot.entries if e.metric == 'successes']
+        self.assertEqual([(e.user_id, e.value, e.position) for e in success], [(1, 5, 1), (2, 5, 1)])
+        for metric in ('payout', 'best'):
+            self.assertEqual([(e.user_id, e.value) for e in snapshot.entries if e.metric == metric], [(2, 200), (1, 100)])
+        self.assertIsNone(await RankingService.get_panel())
+        await RankingService.save_panel(1, 2, 3)
+        self.assertEqual(await RankingService.get_panel(), [1, 2, 3])
+        await RankingService.save_panel(1, 2, 4)
+        self.assertEqual(await RankingService.get_panel(), [1, 2, 4])
+
+    async def test_ranking_top_10_excludes_zero_and_keeps_exact_amounts(self):
+        from services.ranking_service import RankingService
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for uid in range(13):
+                await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, dict(
+                    session_id=f'top-{uid}', user_id=uid, user_name='user', difficulty='上級',
+                    start_price=0, success_count=uid, final_reward=(10**60 + uid) if uid else 0,
+                    result='retreat', failure_point=None, is_test=0,
+                ))
+        snapshot = await RankingService.refresh()
+        for metric in ('successes', 'payout', 'best'):
+            entries = [e for e in snapshot.entries if e.metric == metric]
+            self.assertEqual([e.user_id for e in entries], list(range(12, 2, -1)))
+            if metric != 'successes':
+                self.assertEqual(entries[0].value, 10**60 + 12)
+
     async def asyncSetUp(self):
         self.catalog = install_test_catalog(self)
         with patch.dict(os.environ, {"MYSQL_URL": os.environ["TAKARA_TEST_MYSQL_URL"]}):
