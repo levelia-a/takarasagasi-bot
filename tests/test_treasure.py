@@ -27,8 +27,25 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.connection.commit = AsyncMock()
         self.connection.rollback = AsyncMock()
         self.roll = 1
-        TreasureService._active_users = set()
-        TreasureService._active_users_lock = asyncio.Lock()
+        self.active = {}
+        active_repo = AsyncMock()
+
+        async def claim(cursor, user_id, session_id):
+            if user_id in self.active:
+                return False
+            self.active[user_id] = session_id
+            return True
+
+        async def release(cursor, user_id, session_id):
+            if self.active.get(user_id) == session_id:
+                self.active.pop(user_id)
+
+        active_repo.claim.side_effect = claim
+        active_repo.release.side_effect = release
+        active_repo.refresh.return_value = None
+        self.enterContext(
+            patch("services.treasure_service.ActiveExplorationRepository", active_repo)
+        )
         self.enterContext(
             patch.object(DbService, "get_connection", self.db.get_connection)
         )
@@ -139,9 +156,11 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TreasureAlreadyActive):
             await self.create()
         await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
         restarted = await self.create()
         self.assertEqual(restarted.user_id, session.user_id)
         await TreasureService.retreat(restarted)
+        await TreasureService.release_user(restarted.user_id, restarted.id)
 
     async def test_operation_off_blocks_start(self):
         self.values["operation"] = 0
@@ -176,6 +195,23 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second[2], exploration_id)
         self.assertEqual(first[3]["result"], "failure")
         self.assertEqual(second[3]["result"], "failure")
+
+    async def test_retreat_retries_pending_progress_with_final_result(self):
+        session = await self.create()
+        self.progress.side_effect = [RuntimeError("db unavailable"), None]
+
+        with self.assertRaises(RuntimeError):
+            await TreasureService.explore(session)
+
+        exploration_id = session.pending_exploration_id
+        self.assertIsNotNone(exploration_id)
+        await TreasureService.retreat(session)
+
+        self.assertEqual(session.result, "retreat")
+        self.assertIsNone(session.pending_exploration_id)
+        retry = self.progress.await_args_list[1].args
+        self.assertEqual(retry[2], exploration_id)
+        self.assertEqual(retry[3]["result"], "retreat")
 
     async def test_concurrent_end_operations_do_not_change_result(self):
         self.values["beginner_max"] = 1
