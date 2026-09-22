@@ -338,6 +338,16 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "不足テーブル"):
             await SchemaService.validate_required_tables()
 
+    async def test_schema_validation_rejects_missing_idempotency_primary_key(self):
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute("ALTER TABLE user_progress_events DROP PRIMARY KEY")
+
+        with self.assertRaisesRegex(RuntimeError, "PRIMARY KEY"):
+            await SchemaService.validate_required_tables()
+
     async def test_read_connection_uses_autocommit_without_transaction(self):
         async with (
             DbService.get_connection() as connection,
