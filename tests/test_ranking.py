@@ -28,7 +28,7 @@ class RankingTests(unittest.IsolatedAsyncioTestCase):
         channel.get_partial_message.return_value = message
         bot.fetch_channel = AsyncMock(return_value=channel)
         cog = RankingCommands(bot)
-        self.assertEqual(cog.refresh_rankings.seconds, 43200)
+        self.assertEqual(cog.refresh_rankings.seconds, 21600)
         with patch.object(RankingService, 'refresh', new_callable=AsyncMock), patch.object(
             RankingService, 'get_panel', new_callable=AsyncMock, return_value=[1, 2, 3]
         ), self.assertLogs('commands.ranking', level='ERROR'):
@@ -61,12 +61,12 @@ class RankingTests(unittest.IsolatedAsyncioTestCase):
         interaction.channel.send.assert_not_called()
 
     def test_empty_and_large_values_fit_discord_limits(self):
-        self.assertIn('初回集計中', ranking_embeds(None, 43200)[0].description)
-        self.assertTrue(all('まだ記録' in e.description for e in ranking_embeds(self.snapshot, 43200)))
+        self.assertIn('初回集計中', ranking_embeds(None, 21600)[0].description)
+        self.assertTrue(all('まだ記録' in e.description for e in ranking_embeds(self.snapshot, 21600)))
         snapshot = RankingSnapshot(tuple(
             RankingEntry(1545489116127559682 + i, metric, 10**65 - 1, i + 1)
             for metric in ('successes', 'payout', 'best') for i in range(10)
         ), self.snapshot.updated_at)
-        embeds = ranking_embeds(snapshot, 43200)
+        embeds = ranking_embeds(snapshot, 21600)
         self.assertLessEqual(sum(len(e) for e in embeds), 6000)
         self.assertTrue(all(len(e.description) <= 4096 for e in embeds))

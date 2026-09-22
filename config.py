@@ -76,7 +76,7 @@ class Config:
     token: str = field(repr=False)
     guild_id: int
     database: DatabaseConfig
-    ranking_interval_seconds: int = 43200
+    ranking_interval_seconds: int = 21600
 
     @classmethod
     def from_env(cls):
@@ -90,7 +90,7 @@ class Config:
         )
         if guild_id <= 0:
             raise ValueError("GUILD_ID は正の整数で指定してください。")
-        ranking_interval_seconds = int(os.getenv("RANKING_INTERVAL_SECONDS") or "43200")
+        ranking_interval_seconds = int(os.getenv("RANKING_INTERVAL_SECONDS") or "21600")
         if not 60 <= ranking_interval_seconds <= 86400:
             raise ValueError("RANKING_INTERVAL_SECONDS は60〜86400秒で指定してください。")
         return cls(token, guild_id, database, ranking_interval_seconds)

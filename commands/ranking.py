@@ -43,7 +43,7 @@ def ranking_embeds(snapshot, interval_seconds):
 
 
 class RankingCommands(commands.Cog):
-    def __init__(self, bot, interval_seconds=43200):
+    def __init__(self, bot, interval_seconds=21600):
         self.bot = bot
         self.panel_lock = asyncio.Lock()
         self.interval_seconds = interval_seconds
@@ -62,7 +62,7 @@ class RankingCommands(commands.Cog):
             except asyncio.CancelledError:
                 pass
 
-    @tasks.loop(seconds=43200)
+    @tasks.loop(seconds=21600)
     async def refresh_rankings(self):
         try:
             await RankingService.refresh()
@@ -90,7 +90,7 @@ class RankingCommands(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @app_commands.command(name="takara_ranking_panel", description="このチャンネルに12時間更新のランキングを設置します")
+    @app_commands.command(name="takara_ranking_panel", description="このチャンネルに6時間更新のランキングを設置します")
     @app_commands.guild_only()
     @app_commands.default_permissions(administrator=True)
     async def takara_ranking_panel(self, interaction: discord.Interaction):
