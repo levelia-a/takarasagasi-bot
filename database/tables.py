@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS unlock_notifications (
     PRIMARY KEY (user_id, difficulty)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 同一ユーザーが複数プロセスから同時に宝探しを開始するのを防ぐ。
+CREATE TABLE IF NOT EXISTS active_explorations (
+    user_id BIGINT UNSIGNED PRIMARY KEY,
+    session_id CHAR(36) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    INDEX idx_active_explorations_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS admin_logs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     admin_id BIGINT UNSIGNED NOT NULL,
