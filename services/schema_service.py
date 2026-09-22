@@ -1,5 +1,7 @@
 """起動時に、難易度解放と冪等性に必要なMySQLスキーマを検証する。"""
 
+import re
+
 from services.db_service import DbService
 
 
@@ -14,17 +16,101 @@ class SchemaService:
         "admin_logs",
     }
     REQUIRED_COLUMNS = {
-        "user_progress": {"user_id", "beginner_explorations", "intermediate_explorations"},
-        "user_progress_events": {"exploration_id", "user_id", "created_at"},
-        "unlock_notifications": {"user_id", "difficulty", "created_at"},
-        "active_explorations": {"user_id", "session_id", "expires_at"},
+        "settings": {"key": "varchar(64)", "value": "varchar(255)"},
+        "statistics": {
+            "id": "bigint unsigned",
+            "session_id": "char(36)",
+            "user_id": "bigint unsigned",
+            "user_name": "varchar(255)",
+            "difficulty": "varchar(32)",
+            "start_price": "decimal(65,0)",
+            "success_count": "int unsigned",
+            "final_reward": "decimal(65,0)",
+            "result": "varchar(32)",
+            "failure_point": "int unsigned",
+            "is_test": "tinyint",
+            "created_at": "datetime",
+        },
+        "user_progress": {
+            "user_id": "bigint unsigned",
+            "beginner_explorations": "int unsigned",
+            "intermediate_explorations": "int unsigned",
+        },
+        "user_progress_events": {
+            "exploration_id": "varchar(80)",
+            "user_id": "bigint unsigned",
+            "created_at": "datetime",
+        },
+        "unlock_notifications": {
+            "user_id": "bigint unsigned",
+            "difficulty": "varchar(32)",
+            "created_at": "datetime",
+        },
+        "active_explorations": {
+            "user_id": "bigint unsigned",
+            "session_id": "char(36)",
+            "expires_at": "datetime",
+        },
+        "admin_logs": {
+            "id": "bigint unsigned",
+            "admin_id": "bigint unsigned",
+            "admin_name": "varchar(255)",
+            "action": "varchar(255)",
+            "detail": "text",
+            "created_at": "datetime",
+        },
     }
     REQUIRED_PRIMARY_KEYS = {
+        "settings": {"key"},
+        "statistics": {"id"},
         "user_progress": {"user_id"},
         "user_progress_events": {"exploration_id"},
         "unlock_notifications": {"user_id", "difficulty"},
         "active_explorations": {"user_id"},
+        "admin_logs": {"id"},
     }
+    REQUIRED_UNIQUE_KEYS = {
+        "statistics": ("session_id",),
+        "active_explorations": ("session_id",),
+    }
+    REQUIRED_DEFAULTS = {
+        ("user_progress", "beginner_explorations"): "0",
+        ("user_progress", "intermediate_explorations"): "0",
+        ("statistics", "is_test"): "0",
+        **{
+            (table, "created_at"): "current_timestamp"
+            for table in (
+                "statistics",
+                "user_progress_events",
+                "unlock_notifications",
+                "admin_logs",
+            )
+        },
+    }
+
+    @staticmethod
+    def validate_column(table, name, row, expected_type):
+        # 整数の表示幅はMySQL 8のバージョンによって有無が異なり、保存範囲には影響しない。
+        column_type = re.sub(
+            r"\b(tinyint|int|bigint)\(\d+\)", r"\1", row["COLUMN_TYPE"].lower()
+        )
+        nullable = "YES" if (table, name) == ("statistics", "failure_point") else "NO"
+        if column_type != expected_type or row["IS_NULLABLE"] != nullable:
+            raise RuntimeError(
+                f"DBスキーマが不正です。{table}.{name} の型またはNULL許容が想定と異なります。"
+            )
+        expected_default = SchemaService.REQUIRED_DEFAULTS.get((table, name))
+        if expected_default is not None:
+            actual = str(row["COLUMN_DEFAULT"]).lower().removesuffix("()")
+            if actual != expected_default:
+                raise RuntimeError(
+                    f"DBスキーマが不正です。{table}.{name} のDEFAULTが想定と異なります。"
+                )
+        if table in ("statistics", "admin_logs") and name == "id":
+            if "auto_increment" not in row["EXTRA"].lower():
+                raise RuntimeError(
+                    f"DBスキーマが不正です。{table}.id にAUTO_INCREMENTがありません。"
+                )
 
     @staticmethod
     async def validate_required_tables():
@@ -33,11 +119,9 @@ class SchemaService:
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            await cursor.execute(
-                """SELECT TABLE_NAME, ENGINE
+            await cursor.execute("""SELECT TABLE_NAME, ENGINE
                    FROM INFORMATION_SCHEMA.TABLES
-                   WHERE TABLE_SCHEMA = DATABASE()"""
-            )
+                   WHERE TABLE_SCHEMA = DATABASE()""")
             table_rows = await cursor.fetchall()
             engines = {row["TABLE_NAME"]: row["ENGINE"] for row in table_rows}
 
@@ -61,17 +145,22 @@ class SchemaService:
 
             for table, required_columns in SchemaService.REQUIRED_COLUMNS.items():
                 await cursor.execute(
-                    """SELECT COLUMN_NAME, IS_NULLABLE
+                    """SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
                        FROM INFORMATION_SCHEMA.COLUMNS
                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s""",
                     (table,),
                 )
                 columns = {row["COLUMN_NAME"]: row for row in await cursor.fetchall()}
-                missing_columns = sorted(required_columns - columns.keys())
+                missing_columns = sorted(required_columns.keys() - columns.keys())
                 if missing_columns:
                     raise RuntimeError(
                         f"DBスキーマが不正です。{table} の不足列: "
                         + ", ".join(missing_columns)
+                    )
+
+                for name, expected_type in required_columns.items():
+                    SchemaService.validate_column(
+                        table, name, columns[name], expected_type
                     )
 
                 await cursor.execute(
@@ -88,4 +177,23 @@ class SchemaService:
                 if primary != expected:
                     raise RuntimeError(
                         f"DBスキーマが不正です。{table} のPRIMARY KEYが想定と異なります。"
+                    )
+
+            for table, expected in SchemaService.REQUIRED_UNIQUE_KEYS.items():
+                await cursor.execute(
+                    """SELECT INDEX_NAME, COLUMN_NAME, SUB_PART
+                       FROM INFORMATION_SCHEMA.STATISTICS
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                         AND NON_UNIQUE = 0
+                       ORDER BY INDEX_NAME, SEQ_IN_INDEX""",
+                    (table,),
+                )
+                indexes = {}
+                for row in await cursor.fetchall():
+                    indexes.setdefault(row["INDEX_NAME"], []).append(
+                        (row["COLUMN_NAME"], row["SUB_PART"])
+                    )
+                if [(name, None) for name in expected] not in indexes.values():
+                    raise RuntimeError(
+                        f"DBスキーマが不正です。{table} に {', '.join(expected)} の完全なUNIQUE制約がありません。"
                     )

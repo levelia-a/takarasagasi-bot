@@ -5,6 +5,7 @@
 解放状態そのものは保存せず、常に探索回数を基準にする。
 """
 
+from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
@@ -54,7 +55,10 @@ class ProgressService:
                 )
 
         # 条件引き下げで既に到達済みでも、未表示なら次の挑戦画面で通知する。
-        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
             if not await ProgressRepository.has_unlock_notification(
                 cursor, user_id, difficulty
             ):
@@ -62,12 +66,18 @@ class ProgressService:
         return None
 
     @staticmethod
-    async def record_exploration(user_id, difficulty, exploration_id, result=None):
+    async def record_exploration(
+        user_id, difficulty, exploration_id, result=None, *, session_id
+    ):
         """探索進捗を保存し、終了結果があれば同じトランザクションで保存する。"""
         async with DbService.get_connection() as connection:
             await connection.begin()
             try:
                 async with connection.cursor() as cursor:
+                    # 保存完了まで開始枠をロックし、期限切れによる所有者交代と競合させない。
+                    await ActiveExplorationRepository.refresh(
+                        cursor, user_id, session_id
+                    )
                     progress, _ = await ProgressRepository.increment_explorations(
                         cursor, user_id, difficulty, exploration_id
                     )
@@ -97,7 +107,10 @@ class ProgressService:
             target = None
 
         if target is not None:
-            async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            async with (
+                DbService.get_connection() as connection,
+                connection.cursor() as cursor,
+            ):
                 if not await ProgressRepository.has_unlock_notification(
                     cursor, user_id, target
                 ):
@@ -112,8 +125,10 @@ class ProgressService:
         """Discordへの通知表示が成功した後だけ通知済み状態を保存する。"""
         if difficulty is None:
             return
-        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
             await ProgressRepository.mark_unlock_notification(
                 cursor, user_id, difficulty
             )
-

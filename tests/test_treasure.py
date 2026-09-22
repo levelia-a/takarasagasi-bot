@@ -6,7 +6,11 @@ from consts.treasure import DEFAULT_SETTINGS
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.settings_service import SettingsService
-from services.treasure_service import TreasureAlreadyActive, TreasureService, TreasureStopped
+from services.treasure_service import (
+    TreasureAlreadyActive,
+    TreasureService,
+    TreasureStopped,
+)
 
 
 class TreasureTests(unittest.IsolatedAsyncioTestCase):
@@ -90,7 +94,8 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(cursor, self.cursor)
         self.assertEqual(record["final_reward"], 4000)
         self.assertEqual(record["result"], "retreat")
-        self.connection.begin.assert_not_awaited()
+        self.connection.begin.assert_awaited_once()
+        self.connection.commit.assert_awaited_once()
 
     async def test_failure_loses_all_reward(self):
         session = await self.create()
@@ -150,6 +155,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                 await TreasureService.explore(session)
                 self.assertEqual(session.result, result)
                 self.assertTrue(session.is_test)
+                await TreasureService.release_user(session.user_id, session.id)
 
     async def test_same_user_cannot_start_second_active_session(self):
         session = await self.create()

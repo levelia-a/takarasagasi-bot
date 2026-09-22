@@ -85,7 +85,7 @@ python -X pycache_prefix=.cache/pycache main.py
 設定はPython起動前に必要なため、Botが読み込む `.env` には記載しません。
 参照: [Pythonのキャッシュ保存先設定](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPYCACHEPREFIX)。
 
-起動時はMySQLへ接続した直後に必須7テーブルの存在に加え、難易度解放で重要な列・PRIMARY KEY・InnoDBを検査し、不一致があれば起動を中止します。テーブル作成・変更・データ移行は行いません。
+起動時はMySQLへ接続した直後に必須7テーブルの存在・InnoDB・必要列の型とNULL許容・PRIMARY KEY・保存に必要なDEFAULTとAUTO_INCREMENTを検査します。`statistics.session_id` と `active_explorations.session_id` は単独列全体のUNIQUE制約も検査し、不一致があれば起動を中止します。テーブル作成・変更・データ移行は行いません。
 `settings` は空の状態でも使用できます。未登録項目は `consts/treasure.py` の初期値を使い、管理画面で変更した項目をDBに保存します。
 Bot用DBユーザーには専用DBの `SELECT / INSERT / UPDATE / DELETE` 権限が必要です。
 テーブルを手動作成するユーザーには別途 `CREATE` 権限が必要です。
@@ -102,6 +102,8 @@ Botの招待には `bot` と `applications.commands` スコープ、および投
 - 探索回数は1〜215、最大報酬は65桁以内です。最大回数1の場合も最初の成功で完走します。
 - 同じゲームの結果は重複保存しません。通常統計からテスト結果を除外します。
 - 操作期限は5分です。途中のゲームはメモリ上だけに保持し、タイムアウト・再起動時は精算も結果保存も行いません。入口パネルは再起動後も使用できます。
+- 初回探索の処理中は追加のボタン操作を受け付けません。画面にボタンが表示された後のDB・Discordエラーでは同じセッションを再操作でき、未保存の探索は再抽選せず保存を再試行します。初回判定前にエラーになった場合は、再操作でまず初回探索を実行します。
+- 開始枠の期限切れや所有者交代を検出したセッションは操作を終了します。進捗・結果の保存時にも有効な所有権を確認し、同一transactionで開始枠の行ロックを保持するため、保存中に別セッションへ所有者が切り替わりません。
 - 時刻はMySQLセッションのJSTで記録します。
 
 ## 検証

@@ -76,9 +76,7 @@ class TreasureService:
     async def release_user(user_id, session_id):
         """指定セッションが所有するDBロックだけを解放する。"""
         async with DbService.get_connection() as connection, connection.cursor() as cursor:
-            await ActiveExplorationRepository.release(
-                cursor, user_id, session_id
-            )
+            await ActiveExplorationRepository.release(cursor, user_id, session_id)
 
     @staticmethod
     async def create(user_id, user_name, difficulty):
@@ -90,7 +88,9 @@ class TreasureService:
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
-        unlock_notice = await ProgressService.require_unlocked(user_id, difficulty, settings)
+        unlock_notice = await ProgressService.require_unlocked(
+            user_id, difficulty, settings
+        )
         session_id = str(uuid4())
         await TreasureService._claim_user(user_id, session_id)
         try:
@@ -117,12 +117,15 @@ class TreasureService:
             await TreasureService._refresh_user(session)
             # 前回のDB保存が失敗した場合は、同じ探索を再抽選せず保存だけ再試行する。
             if session.pending_exploration_id is not None:
-                result = TreasureService.build_result(session) if session.result else None
+                result = (
+                    TreasureService.build_result(session) if session.result else None
+                )
                 unlocked = await ProgressService.record_exploration(
                     session.user_id,
                     session.difficulty,
                     session.pending_exploration_id,
                     result,
+                    session_id=session.id,
                 )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
@@ -150,12 +153,15 @@ class TreasureService:
                 session.pending_exploration_id = (
                     f"{session.id}:{session.exploration_count}"
                 )
-                result = TreasureService.build_result(session) if session.result else None
+                result = (
+                    TreasureService.build_result(session) if session.result else None
+                )
                 unlocked = await ProgressService.record_exploration(
                     session.user_id,
                     session.difficulty,
                     session.pending_exploration_id,
                     result,
+                    session_id=session.id,
                 )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
@@ -178,6 +184,7 @@ class TreasureService:
                     session.difficulty,
                     session.pending_exploration_id,
                     TreasureService.build_result(session),
+                    session_id=session.id,
                 )
                 if unlocked:
                     session.unlocked_difficulty = unlocked
@@ -199,9 +206,9 @@ class TreasureService:
             "success_count": session.success_count,
             "final_reward": session.reward,
             "result": session.result,
-            "failure_point": session.exploration_count
-            if session.result == "failure"
-            else None,
+            "failure_point": (
+                session.exploration_count if session.result == "failure" else None
+            ),
             "is_test": session.is_test,
         }
 
@@ -209,11 +216,17 @@ class TreasureService:
     async def save_result(session):
         """探索結果をセッションID単位で重複なく保存する。"""
         result = TreasureService.build_result(session)
-        async with (
-            DbService.get_connection() as connection,
-            connection.cursor() as cursor,
-        ):
-            await ResultRepository.insert_statistics_record_if_session_id_not_exists(
-                cursor, result
-            )
-
+        async with DbService.get_connection() as connection:
+            await connection.begin()
+            try:
+                async with connection.cursor() as cursor:
+                    await ActiveExplorationRepository.refresh(
+                        cursor, session.user_id, session.id
+                    )
+                    await ResultRepository.insert_statistics_record_if_session_id_not_exists(
+                        cursor, result
+                    )
+                await connection.commit()
+            except BaseException:
+                await connection.rollback()
+                raise

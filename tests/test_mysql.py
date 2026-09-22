@@ -3,19 +3,25 @@ import os
 import unittest
 from unittest.mock import patch
 
-from pymysql.err import IntegrityError
+from aiomysql import Connection
+from pymysql.err import IntegrityError, OperationalError
 
 from config import DatabaseConfig
 from consts.treasure import DEFAULT_SETTINGS
 from database.tables import TABLES_SQL
+from repositories.active_exploration_repository import (
+    ActiveExplorationRepository,
+    TreasureSessionExpired,
+)
 from repositories.settings_repository import SettingsRepository
 from repositories.progress_repository import ProgressRepository
+from repositories.result_repository import ResultRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.schema_service import SchemaService
 from services.settings_service import SettingsService
-from services.treasure_service import TreasureService
+from services.treasure_service import TreasureAlreadyActive, TreasureService
 
 
 @unittest.skipUnless(
@@ -56,7 +62,15 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             DbService.get_connection() as connection,
             connection.cursor() as cursor,
         ):
-            for table in ("admin_logs", "active_explorations", "unlock_notifications", "user_progress_events", "user_progress", "statistics", "settings"):
+            for table in (
+                "admin_logs",
+                "active_explorations",
+                "unlock_notifications",
+                "user_progress_events",
+                "user_progress",
+                "statistics",
+                "settings",
+            ):
                 await cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
     async def test_game_save_statistics_and_test_cleanup(self):
@@ -69,8 +83,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         )
         await TreasureService.explore(session)
         await TreasureService.retreat(session)
-        await TreasureService.release_user(session.user_id, session.id)
         await TreasureService.save_result(session)
+        await TreasureService.release_user(session.user_id, session.id)
         rows = await AdminService.history()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["user_id"], 1545489116127559682)
@@ -134,9 +148,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_progress_save_retry_does_not_double_count_or_skip_reward(self):
         user_id = 1545489116127559684
-        await SettingsService.update(
-            {"beginner_max": 3}, 1, "admin", "最大探索変更"
-        )
+        await SettingsService.update({"beginner_max": 3}, 1, "admin", "最大探索変更")
         session = await TreasureService.create(user_id, "retry-test", "beginner")
         original_record = ProgressService.record_exploration
         calls = 0
@@ -151,7 +163,9 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             return result
 
         with patch.object(
-            ProgressService, "record_exploration", side_effect=lose_response_after_commit
+            ProgressService,
+            "record_exploration",
+            side_effect=lose_response_after_commit,
         ):
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
@@ -177,6 +191,206 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
                 (user_id,),
             )
             self.assertEqual((await cursor.fetchone())["count"], 3)
+
+    async def expire_claim(self, user_id):
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute(
+                "UPDATE active_explorations SET expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE user_id = %s",
+                (user_id,),
+            )
+
+    async def test_concurrent_claims_have_exactly_one_owner(self):
+        results = await asyncio.gather(
+            *(TreasureService.create(123, "race", "beginner") for _ in range(4)),
+            return_exceptions=True,
+        )
+        self.assertEqual(
+            sum(isinstance(result, TreasureAlreadyActive) for result in results), 3
+        )
+        self.assertEqual(
+            sum(not isinstance(result, Exception) for result in results), 1
+        )
+
+    async def test_expired_claim_cannot_be_revived_or_replace_new_owner(self):
+        session = await TreasureService.create(123, "old", "beginner")
+        await self.expire_claim(session.user_id)
+        with self.assertRaises(TreasureSessionExpired):
+            await TreasureService.explore(session)
+        newer = await TreasureService.create(123, "new", "beginner")
+        for operation in (TreasureService.explore, TreasureService.retreat):
+            with self.assertRaises(TreasureSessionExpired):
+                await operation(session)
+        self.assertEqual(session.exploration_count, 0)
+        self.assertIsNone(session.result)
+        await TreasureService.release_user(session.user_id, session.id)
+        # 旧セッションの終了処理が、新しい所有者の開始枠を削除しない。
+        with self.assertRaises(TreasureAlreadyActive):
+            await TreasureService.create(123, "third", "beginner")
+        await TreasureService.explore(newer)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            1,
+        )
+
+    async def test_repeated_refresh_in_same_second_is_valid(self):
+        session = await TreasureService.create(123, "refresh", "beginner")
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute("SET timestamp = UNIX_TIMESTAMP()")
+            try:
+                await ActiveExplorationRepository.refresh(cursor, 123, session.id)
+                await ActiveExplorationRepository.refresh(cursor, 123, session.id)
+            finally:
+                await cursor.execute("SET timestamp = 0")
+
+    async def test_lost_ownership_between_roll_and_save_blocks_progress(self):
+        session = await TreasureService.create(123, "old", "beginner")
+        original_record = ProgressService.record_exploration
+
+        async def replace_owner(*args, **kwargs):
+            await self.expire_claim(123)
+            await TreasureService.create(123, "new", "beginner")
+            return await original_record(*args, **kwargs)
+
+        with patch.object(
+            ProgressService, "record_exploration", side_effect=replace_owner
+        ):
+            with self.assertRaises(TreasureSessionExpired):
+                await TreasureService.explore(session)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            0,
+        )
+        self.assertEqual(len(await AdminService.history()), 0)
+
+    async def test_lost_ownership_before_result_save_blocks_statistics(self):
+        session = await TreasureService.create(123, "old", "beginner")
+        await TreasureService.explore(session)
+        original_save = TreasureService.save_result
+
+        async def replace_owner(session):
+            await self.expire_claim(123)
+            await TreasureService.create(123, "new", "beginner")
+            return await original_save(session)
+
+        with patch.object(TreasureService, "save_result", side_effect=replace_owner):
+            with self.assertRaises(TreasureSessionExpired):
+                await TreasureService.retreat(session)
+        self.assertEqual(len(await AdminService.history()), 0)
+
+    async def test_failed_progress_then_retreat_commits_matching_statistics(self):
+        session = await TreasureService.create(123, "retry", "beginner")
+        original_increment = ProgressRepository.increment_explorations
+
+        async def fail_after_increment(*args):
+            await original_increment(*args)
+            raise RuntimeError("connection failed before commit")
+
+        with patch.object(
+            ProgressRepository,
+            "increment_explorations",
+            side_effect=fail_after_increment,
+        ):
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            0,
+        )
+        await TreasureService.retreat(session)
+        await TreasureService.retreat(session)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            1,
+        )
+        rows = await AdminService.history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            (rows[0]["result"], rows[0]["success_count"], rows[0]["final_reward"]),
+            ("retreat", 1, 2000),
+        )
+
+    async def test_commit_ack_loss_then_retreat_does_not_double_count(self):
+        session = await TreasureService.create(123, "commit-retry", "beginner")
+        original_commit = Connection.commit
+
+        async def lose_ack(connection):
+            await original_commit(connection)
+            raise OperationalError(2013, "COMMIT response lost")
+
+        with patch.object(Connection, "commit", new=lose_ack):
+            with self.assertRaises(OperationalError):
+                await TreasureService.explore(session)
+        self.assertIsNotNone(session.pending_exploration_id)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            1,
+        )
+        await TreasureService.retreat(session)
+        self.assertEqual(
+            (await ProgressService.get_exploration_counts(123))[
+                "beginner_explorations"
+            ],
+            1,
+        )
+        rows = await AdminService.history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["success_count"], rows[0]["final_reward"]), (1, 2000))
+
+    async def test_owner_row_stays_locked_during_progress_and_result_writes(self):
+        session = await TreasureService.create(123, "transaction", "beginner")
+
+        async def assert_owner_locked():
+            async with DbService.get_connection() as connection:
+                await connection.begin()
+                try:
+                    async with connection.cursor() as cursor:
+                        with self.assertRaises(OperationalError) as caught:
+                            await cursor.execute(
+                                "SELECT * FROM active_explorations WHERE user_id = 123 FOR UPDATE NOWAIT"
+                            )
+                        self.assertEqual(caught.exception.args[0], 3572)
+                finally:
+                    await connection.rollback()
+
+        original_increment = ProgressRepository.increment_explorations
+        original_result = (
+            ResultRepository.insert_statistics_record_if_session_id_not_exists
+        )
+
+        async def increment(*args):
+            await assert_owner_locked()
+            return await original_increment(*args)
+
+        async def insert_result(*args):
+            await assert_owner_locked()
+            return await original_result(*args)
+
+        with patch.object(
+            ProgressRepository, "increment_explorations", side_effect=increment
+        ):
+            await TreasureService.explore(session)
+        with patch.object(
+            ResultRepository,
+            "insert_statistics_record_if_session_id_not_exists",
+            side_effect=insert_result,
+        ):
+            await TreasureService.retreat(session)
 
     async def test_unlock_notification_is_marked_only_after_display_ack(self):
         user_id = 1545489116127559690
@@ -231,9 +445,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_final_result_failure_rolls_back_progress_with_statistics(self):
         user_id = 1545489116127559686
-        await SettingsService.update(
-            {"beginner_max": 1}, 1, "admin", "最大探索変更"
-        )
+        await SettingsService.update({"beginner_max": 1}, 1, "admin", "最大探索変更")
         session = await TreasureService.create(user_id, "atomic-test", "beginner")
         with patch(
             "services.progress_service.ResultRepository.insert_statistics_record_if_session_id_not_exists",
@@ -346,6 +558,137 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             await cursor.execute("ALTER TABLE user_progress_events DROP PRIMARY KEY")
 
         with self.assertRaisesRegex(RuntimeError, "PRIMARY KEY"):
+            await SchemaService.validate_required_tables()
+
+    async def test_schema_validation_accepts_declared_schema(self):
+        await SchemaService.validate_required_tables()
+
+    async def test_schema_validation_rejects_broken_column_definitions(self):
+        cases = (
+            (
+                "user_progress",
+                "beginner_explorations",
+                "INT UNSIGNED NULL DEFAULT 0",
+                "INT UNSIGNED NOT NULL DEFAULT 0",
+                "NULL",
+            ),
+            (
+                "user_progress",
+                "intermediate_explorations",
+                "INT NOT NULL DEFAULT 0",
+                "INT UNSIGNED NOT NULL DEFAULT 0",
+                "型",
+            ),
+            (
+                "user_progress",
+                "beginner_explorations",
+                "INT UNSIGNED NOT NULL DEFAULT 1",
+                "INT UNSIGNED NOT NULL DEFAULT 0",
+                "DEFAULT",
+            ),
+            (
+                "user_progress_events",
+                "exploration_id",
+                "VARCHAR(36) NOT NULL",
+                "VARCHAR(80) NOT NULL",
+                "型",
+            ),
+            (
+                "user_progress_events",
+                "created_at",
+                "DATETIME NOT NULL",
+                "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "DEFAULT",
+            ),
+            (
+                "active_explorations",
+                "expires_at",
+                "DATETIME NULL",
+                "DATETIME NOT NULL",
+                "NULL",
+            ),
+            ("statistics", "session_id", "CHAR(36) NULL", "CHAR(36) NOT NULL", "NULL"),
+            (
+                "statistics",
+                "final_reward",
+                "DECIMAL(20,0) NOT NULL",
+                "DECIMAL(65,0) NOT NULL",
+                "型",
+            ),
+            (
+                "statistics",
+                "id",
+                "BIGINT UNSIGNED NOT NULL",
+                "BIGINT UNSIGNED NOT NULL AUTO_INCREMENT",
+                "AUTO_INCREMENT",
+            ),
+        )
+        for table, column, broken, correct, message in cases:
+            with self.subTest(table=table, column=column, broken=broken):
+                async with (
+                    DbService.get_connection() as connection,
+                    connection.cursor() as cursor,
+                ):
+                    await cursor.execute(
+                        f"ALTER TABLE {table} MODIFY {column} {broken}"
+                    )
+                try:
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        await SchemaService.validate_required_tables()
+                finally:
+                    async with (
+                        DbService.get_connection() as connection,
+                        connection.cursor() as cursor,
+                    ):
+                        await cursor.execute(
+                            f"ALTER TABLE {table} MODIFY {column} {correct}"
+                        )
+
+    async def test_schema_validation_rejects_nonunique_composite_and_prefix_session_keys(
+        self,
+    ):
+        for table in ("statistics", "active_explorations"):
+            for index in (
+                "INDEX session_id (session_id)",
+                "UNIQUE session_id (session_id, user_id)",
+                "UNIQUE session_id (session_id(8))",
+            ):
+                with self.subTest(table=table, index=index):
+                    async with (
+                        DbService.get_connection() as connection,
+                        connection.cursor() as cursor,
+                    ):
+                        await cursor.execute(
+                            f"ALTER TABLE {table} DROP INDEX session_id, ADD {index}"
+                        )
+                    try:
+                        with self.assertRaisesRegex(RuntimeError, "UNIQUE"):
+                            await SchemaService.validate_required_tables()
+                    finally:
+                        async with (
+                            DbService.get_connection() as connection,
+                            connection.cursor() as cursor,
+                        ):
+                            await cursor.execute(
+                                f"ALTER TABLE {table} DROP INDEX session_id, ADD UNIQUE session_id (session_id)"
+                            )
+
+    async def test_schema_validation_rejects_nontransactional_engine(self):
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute("ALTER TABLE statistics ENGINE=MyISAM")
+        with self.assertRaisesRegex(RuntimeError, "InnoDB"):
+            await SchemaService.validate_required_tables()
+
+    async def test_schema_validation_rejects_missing_statistics_column(self):
+        async with (
+            DbService.get_connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            await cursor.execute("ALTER TABLE statistics DROP COLUMN final_reward")
+        with self.assertRaisesRegex(RuntimeError, "不足列"):
             await SchemaService.validate_required_tables()
 
     async def test_read_connection_uses_autocommit_without_transaction(self):

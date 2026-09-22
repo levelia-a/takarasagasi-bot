@@ -3,8 +3,13 @@ import asyncio
 import discord
 
 from consts.treasure import DIFFICULTIES
+from repositories.active_exploration_repository import TreasureSessionExpired
 from services.progress_service import DifficultyLocked, ProgressService
-from services.treasure_service import TreasureAlreadyActive, TreasureService, TreasureStopped
+from services.treasure_service import (
+    TreasureAlreadyActive,
+    TreasureService,
+    TreasureStopped,
+)
 from views.common import BaseView
 from views.messages import exploration_text
 
@@ -36,7 +41,7 @@ class ExplorationView(BaseView):
         self.busy = True
         try:
             await interaction.response.defer()
-            if deeper:
+            if deeper or self.session.exploration_count == 0:
                 await interaction.edit_original_response(
                     content="🔎 **さらに奥を探索中……**", view=self
                 )
@@ -44,25 +49,33 @@ class ExplorationView(BaseView):
                 await TreasureService.explore(self.session)
             else:
                 await TreasureService.retreat(self.session)
-            if self.session.result is not None:
-                self.stop()
-                view = None
-            else:
-                view = self
-            await interaction.edit_original_response(
-                content=exploration_text(self.session), view=view
-            )
-            if self.session.result is not None:
-                await TreasureService.release_user(
-                    self.session.user_id, self.session.id
-                )
+            await self.show_result(interaction)
+        except TreasureSessionExpired as error:
+            await interaction.edit_original_response(content=f"⌛ {error}", view=None)
+            self.stop()
+        finally:
+            self.busy = False
+
+    async def show_result(self, interaction):
+        """表示成功後にViewを止める。Discordエラー時は同じsessionで再操作できる。"""
+        finished = self.session.result is not None
+        self.message = await interaction.edit_original_response(
+            content=exploration_text(self.session), view=None if finished else self
+        )
+        if finished:
+            self.stop()
+        try:
             if self.session.unlocked_difficulty:
                 await ProgressService.mark_unlock_notification(
                     self.session.user_id, self.session.unlocked_difficulty
                 )
                 self.session.unlocked_difficulty = None
         finally:
-            self.busy = False
+            # 通知済み保存の失敗で、終了済みゲームの開始枠を残さない。
+            if finished:
+                await TreasureService.release_user(
+                    self.session.user_id, self.session.id
+                )
 
     @discord.ui.button(
         label="さらに奥へ",
@@ -117,6 +130,8 @@ class TreasureView(BaseView):
             await interaction.edit_original_response(content=str(error))
             return
         view = ExplorationView(session)
+        # 初回処理もボタン操作と同じbusyで守り、先行撤退や二重探索を防ぐ。
+        view.busy = True
         view_attached = False
         try:
             config = DIFFICULTIES[difficulty]
@@ -131,27 +146,19 @@ class TreasureView(BaseView):
             view_attached = True
             await asyncio.sleep(1.5)
             await TreasureService.explore(session)
-            final_view = view if session.result is None else None
-            message = await interaction.edit_original_response(
-                content=exploration_text(session), view=final_view
-            )
-            if session.unlocked_difficulty:
-                await ProgressService.mark_unlock_notification(
-                    session.user_id, session.unlocked_difficulty
-                )
-                session.unlocked_difficulty = None
-            if final_view:
-                view.message = message
-            else:
-                view.stop()
-                await TreasureService.release_user(session.user_id, session.id)
-
+            await view.show_result(interaction)
+        except TreasureSessionExpired as error:
+            await interaction.edit_original_response(content=f"⌛ {error}", view=None)
+            view.stop()
         except BaseException:
             # Viewを表示する前の失敗だけ開始枠を解放する。
             # 初回探索開始後は同じsession/pending IDで再操作できる状態を残す。
             if not view_attached:
+                view.stop()
                 await TreasureService.release_user(session.user_id, session.id)
             raise
+        finally:
+            view.busy = False
 
     @discord.ui.button(
         label="初級宝探し",
