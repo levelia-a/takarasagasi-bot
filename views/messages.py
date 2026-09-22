@@ -10,9 +10,9 @@ def treasure_panel(settings):
         color=discord.Color.gold(),
         description="宝の地図を手に入れて、危険な場所を探索しよう！\n\n"
         "難易度が高いほど、必要なLIAも大きくなります。\n\n"
-        "✨ 探索に成功すると報酬が2倍！\n"
-        "💥 失敗すると獲得報酬はすべて失われます。\n"
-        "🏠 引き返せば、その時点の報酬を確保できます。",
+        "✨ 探索に成功するたびに宝物を1個発見！\n"
+        "💥 失敗すると発見した宝物はすべて失われます。\n"
+        "🏠 引き返せば、宝物の合計価値を確保できます。",
     )
     for key, difficulty in DIFFICULTIES.items():
         embed.add_field(
@@ -40,23 +40,56 @@ def _append_unlock_notification(text, session):
 def exploration_text(session):
     """探索の進行状態や終了結果に応じたメッセージを作る。"""
     if session.result == "failure":
-        text = f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n報酬はすべて失われます。\n\n💰 最終報酬：**0 LIA**"
+        text = (
+            f"💥 **探索失敗！**\n\n{session.difficulty_name}宝探しで失敗しました。\n"
+            "発見した宝物をすべて失いました。\n\n"
+            f"🔎 探索回数：**{session.exploration_count}/{session.max_exploration}**\n"
+            f"🎒 失った宝物：**{len(session.found_treasures)}個**\n"
+            f"💰 失った宝物の合計価値：**{sum(t.price for t in session.found_treasures):,} LIA**\n"
+            "💰 最終報酬：**0 LIA**"
+        )
         return _append_unlock_notification(text, session)
     title = {
         "retreat": "🏠 **無事に引き返しました！**",
         "max_success": "🎉 **最大探索回数到達！**",
-    }.get(session.result, "✨ **探索成功！**\n\n報酬が2倍になりました！")
+    }.get(session.result, "✨ **宝物を発見！**")
+    discovery = ""
+    if session.found_treasures and session.result in (None, "max_success"):
+        treasure = session.found_treasures[-1]
+        discovery = f"{treasure_name(treasure.name)}\n💰 価値：**{treasure.price:,} LIA**\n\n"
     text = (
         f"{title}\n\n{session.difficulty_name}宝探し\n"
+        f"{discovery}"
         f"🔎 探索回数：**{session.exploration_count}/{session.max_exploration}**\n"
-        f"✨ 成功回数：**{session.success_count}回**\n"
-        f"💰 {'獲得報酬' if session.result else '現在の報酬'}：**{session.reward:,} LIA**"
+        f"🎒 発見した宝物：**{len(session.found_treasures)}個**\n"
+        f"💰 {'最終報酬（宝物合計）' if session.result else '現在の合計価値'}：**{session.reward:,} LIA**"
     )
     # 難易度解放システム：成功・撤退・最大到達にも条件達成通知を追加する。
     text = _append_unlock_notification(text, session)
     if session.result is None:
-        text += "\n\n⚔️ **さらに奥へ進みますか？**\n失敗すると報酬はすべて失われます。"
+        text += "\n\n⚔️ **さらに奥へ進みますか？**\n失敗すると発見した宝物をすべて失います。"
     return text
+
+
+def treasure_name(name):
+    return discord.utils.escape_mentions(discord.utils.escape_markdown(name))
+
+
+def treasure_pages(found_treasures, lost=False):
+    """一覧を行単位で分割する。絵文字もUTF-16単位で数え、2000文字に余裕を残す。"""
+    heading = "🎒 **失った宝物一覧**" if lost else "🎒 **発見した宝物一覧**"
+    lines = [
+        f"探索{item.exploration_number}回目：{treasure_name(item.name)} — {item.price:,} LIA\n"
+        for item in found_treasures
+    ] or ["宝物はありません。\n"]
+    pages, page = [], heading + "\n\n"
+    for line in lines:
+        if len((page + line).encode("utf-16-le")) // 2 > 1800:
+            pages.append(page)
+            page = heading + "\n\n"
+        page += line
+    pages.append(page)
+    return tuple(f"{text}\n{i}/{len(pages)}ページ" for i, text in enumerate(pages, 1))
 
 
 def settings_text(settings):

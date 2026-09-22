@@ -4,13 +4,14 @@ from consts.treasure import DEFAULT_SETTINGS, DIFFICULTIES, MAX_REWARD, TEST_MOD
 from repositories.admin_log_repository import AdminLogRepository
 from repositories.settings_repository import SettingsRepository
 from services.db_service import DbService
+from services.treasure_catalog_service import TreasureCatalogService
 
 
 class SettingsService:
     _lock = asyncio.Lock()
 
     @staticmethod
-    def validate_settings(settings):
+    def validate_settings(settings, catalog=None):
         """設定値の範囲を検証し、不正な場合はValueErrorを送出する。"""
         if settings["test_mode"] not in TEST_MODES:
             raise ValueError("不明なテストモードです。")
@@ -24,16 +25,16 @@ class SettingsService:
             price, rate, maximum = (
                 settings[f"{key}_{suffix}"] for suffix in ("price", "rate", "max")
             )
-            if price < 0:
-                raise ValueError("価格は0以上にしてください。")
+            if not 0 <= price <= MAX_REWARD:
+                raise ValueError("挑戦料は0以上・65桁以内にしてください。")
             if not 0 <= rate <= 100:
                 raise ValueError("成功率は0〜100にしてください。")
             if not 1 <= maximum <= 215:
                 raise ValueError("最大探索回数は1〜215にしてください。")
-            if price * (2**maximum) > MAX_REWARD:
-                raise ValueError(
-                    "最大報酬がMySQLの保存上限（65桁）を超えています。価格か探索回数を下げてください。"
-                )
+        if catalog is None:
+            catalog = TreasureCatalogService.load_catalog()
+        for key in DIFFICULTIES:
+            TreasureCatalogService.validate_reward_limit(catalog[key], settings[f"{key}_max"])
 
     @staticmethod
     def build_settings(rows):

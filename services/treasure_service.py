@@ -11,6 +11,7 @@ from repositories.result_repository import ResultRepository
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.settings_service import SettingsService
+from services.treasure_catalog_service import Treasure, TreasureCatalogService
 
 
 class TreasureStopped(ValueError):
@@ -19,6 +20,14 @@ class TreasureStopped(ValueError):
 
 class TreasureAlreadyActive(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class FoundTreasure:
+    key: str
+    name: str
+    price: int
+    exploration_number: int
 
 
 @dataclass
@@ -34,6 +43,8 @@ class Exploration:
     exploration_count: int = 0
     success_count: int = 0
     reward: int = 0
+    found_treasures: list[FoundTreasure] = field(default_factory=list)
+    treasure_pool: tuple[Treasure, ...] = field(default_factory=tuple, repr=False)
     result: str | None = None
     unlocked_difficulty: str | None = None
     pending_exploration_id: str | None = None
@@ -84,13 +95,15 @@ class TreasureService:
         if difficulty not in DIFFICULTIES:
             raise ValueError("不明な難易度です。")
         settings = await SettingsService.get_all()
-        SettingsService.validate_settings(settings)
+        catalog = TreasureCatalogService.load_catalog()
+        SettingsService.validate_settings(settings, catalog=catalog)
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
         unlock_notice = await ProgressService.require_unlocked(
             user_id, difficulty, settings
         )
+        treasure_pool = TreasureCatalogService.require_available(catalog, difficulty)
         session_id = str(uuid4())
         await TreasureService._claim_user(user_id, session_id)
         try:
@@ -105,6 +118,7 @@ class TreasureService:
                 id=session_id,
                 unlocked_difficulty=unlock_notice,
                 settings=settings,
+                treasure_pool=treasure_pool,
             )
         except BaseException:
             await TreasureService.release_user(user_id, session_id)
@@ -136,13 +150,18 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
 
-            session.exploration_count += 1
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
+            # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
+            treasure = TreasureCatalogService.draw(session.treasure_pool) if success else None
+            session.exploration_count += 1
             if success:
+                session.found_treasures.append(FoundTreasure(
+                    treasure.key, treasure.name, treasure.price, session.exploration_count
+                ))
                 session.success_count += 1
-                session.reward = session.price * (2**session.success_count)
+                session.reward = sum(item.price for item in session.found_treasures)
                 if session.exploration_count >= session.max_exploration:
                     session.result = "max_success"
             else:

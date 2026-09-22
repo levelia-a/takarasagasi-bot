@@ -5,6 +5,7 @@ import discord
 from consts.treasure import DIFFICULTIES
 from repositories.active_exploration_repository import TreasureSessionExpired
 from services.progress_service import DifficultyLocked, ProgressService
+from services.treasure_catalog_service import TreasureCatalogError
 from services.treasure_service import (
     TreasureAlreadyActive,
     TreasureService,
@@ -12,6 +13,7 @@ from services.treasure_service import (
 )
 from views.common import BaseView
 from views.messages import exploration_text
+from views.treasure_inventory import TreasureResultView, show_treasure_list
 
 
 class ExplorationView(BaseView):
@@ -59,9 +61,12 @@ class ExplorationView(BaseView):
     async def show_result(self, interaction):
         """表示成功後にViewを止める。Discordエラー時は同じsessionで再操作できる。"""
         finished = self.session.result is not None
+        display_view = TreasureResultView(self.session) if finished else self
         self.message = await interaction.edit_original_response(
-            content=exploration_text(self.session), view=None if finished else self
+            content=exploration_text(self.session), view=display_view,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
+        display_view.message = self.message
         if finished:
             self.stop()
         try:
@@ -97,6 +102,13 @@ class ExplorationView(BaseView):
         """引き返すボタンのクリックを処理する。"""
         await self.act(interaction, False)
 
+    @discord.ui.button(label="宝物一覧", emoji="🎒", style=discord.ButtonStyle.secondary)
+    async def inventory(self, interaction, button):
+        await show_treasure_list(
+            interaction, self.session.user_id, self.session.found_treasures,
+            self.session.result == "failure",
+        )
+
     async def on_timeout(self):
         """操作期限が切れた画面からボタンを取り除き、開始ロックを解放する。"""
         await TreasureService.release_user(self.session.user_id, self.session.id)
@@ -122,7 +134,7 @@ class TreasureView(BaseView):
             session = await TreasureService.create(
                 interaction.user.id, str(interaction.user), difficulty
             )
-        except (TreasureStopped, TreasureAlreadyActive) as error:
+        except (TreasureStopped, TreasureAlreadyActive, TreasureCatalogError) as error:
             await interaction.edit_original_response(content=f"🔴 {error}")
             return
         # 難易度解放システム：未解放なら本人だけに現在の進捗を表示する。

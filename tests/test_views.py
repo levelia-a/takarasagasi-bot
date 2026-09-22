@@ -10,11 +10,13 @@ from repositories.result_repository import ResultRepository
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.settings_service import SettingsService
-from services.treasure_service import Exploration, TreasureService
+from services.treasure_service import Exploration, FoundTreasure, TreasureService
 from views.admin import AdminView, SettingsModal, TestModeView
 from views.common import send_pages
-from views.messages import exploration_text
+from views.messages import exploration_text, treasure_pages
 from views.treasure import ExplorationView, TreasureView
+from views.treasure_inventory import TreasureResultView, TreasureListView, show_treasure_list
+from tests.treasure_fixtures import install_test_catalog
 
 
 def interaction(admin=False):
@@ -27,13 +29,18 @@ def interaction(admin=False):
             send_message=AsyncMock(),
             defer=AsyncMock(),
             is_done=Mock(return_value=False),
+            edit_message=AsyncMock(),
         ),
         edit_original_response=AsyncMock(),
+        original_response=AsyncMock(),
         followup=SimpleNamespace(send=AsyncMock()),
     )
 
 
 class ViewTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_test_catalog(self)
+
     async def test_persistent_panel_and_commands(self):
         view = TreasureView()
         self.assertTrue(view.is_persistent())
@@ -60,6 +67,53 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_other_user_cannot_play(self):
         view = ExplorationView(SimpleNamespace(user_id=2))
         self.assertFalse(await view.interaction_check(interaction()))
+
+    async def test_inventory_pagination_limits_and_owner(self):
+        found = [FoundTreasure(str(i), "💎" * 100, 10**64, i + 1) for i in range(215)]
+        pages = treasure_pages(found, lost=True)
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(len(page.encode("utf-16-le")) // 2 <= 2000 for page in pages))
+        self.assertEqual(sum(page.count("LIA") for page in pages), 215)
+        self.assertTrue(all("失った宝物一覧" in page for page in pages))
+        event = interaction()
+        await show_treasure_list(event, 1, found, True)
+        view = event.response.send_message.call_args.kwargs["view"]
+        self.assertIsInstance(view, TreasureListView)
+        self.assertTrue(view.previous.disabled)
+        await view.turn_page(event, 1)
+        self.assertEqual(event.response.edit_message.call_args.kwargs["content"], pages[1])
+        self.assertTrue(await view.interaction_check(event))
+        event.user.id = 2
+        self.assertFalse(await view.interaction_check(event))
+        await view.on_timeout()
+        view.message.edit.assert_awaited_once_with(view=None)
+
+    async def test_result_inventory_is_read_only_snapshot(self):
+        session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        session.found_treasures.append(FoundTreasure("a", "**宝物** @everyone", 700, 1))
+        session.result = "failure"
+        view = TreasureResultView(session)
+        session.found_treasures.clear()
+        self.assertEqual([button.label for button in view.children], ["宝物一覧"])
+        event = interaction()
+        await view.inventory.callback(event)
+        content = event.response.send_message.call_args.args[0]
+        self.assertIn("失った宝物一覧", content)
+        self.assertIn("700 LIA", content)
+        self.assertNotIn("@everyone", content)
+        self.assertTrue(event.response.send_message.call_args.kwargs["ephemeral"])
+
+    async def test_discovery_and_final_text_show_treasure_values(self):
+        session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        session.found_treasures.append(FoundTreasure("a", "蒼玉", 1500, 1))
+        session.reward = 1500
+        session.exploration_count = 1
+        text = exploration_text(session)
+        self.assertIn("蒼玉", text)
+        self.assertIn("1,500 LIA", text)
+        self.assertNotIn("2倍", text)
+        session.result = "retreat"
+        self.assertIn("最終報酬（宝物合計）", exploration_text(session))
 
     async def test_rapid_button_click_is_rejected(self):
         view = ExplorationView(SimpleNamespace(user_id=1))
@@ -109,13 +163,14 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         with patch("views.treasure.asyncio.sleep", new=AsyncMock()):
             await view.act(event, True)
         self.assertEqual(session.result, "max_success")
-        self.assertIsNone(event.edit_original_response.call_args.kwargs["view"])
+        self.assertIsInstance(event.edit_original_response.call_args.kwargs["view"], TreasureResultView)
 
     async def test_failed_exploration_includes_unlock_notification(self):
         session = SimpleNamespace(
             result="failure",
             difficulty_name="初級",
             unlocked_difficulty="intermediate",
+            exploration_count=1, max_exploration=5, found_treasures=[],
         )
         text = exploration_text(session)
         self.assertIn("探索失敗", text)
@@ -136,7 +191,9 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
 
 class InitialExplorationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        catalog = install_test_catalog(self)
         self.session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        self.session.treasure_pool = catalog["beginner"]
         self.enterContext(
             patch.object(
                 TreasureService, "create", new=AsyncMock(return_value=self.session)
@@ -172,7 +229,7 @@ class InitialExplorationTests(unittest.IsolatedAsyncioTestCase):
         self.view = None
 
         async def edit(**kwargs):
-            if kwargs.get("view") is not None:
+            if isinstance(kwargs.get("view"), ExplorationView):
                 self.view = kwargs["view"]
             return self.message
 
@@ -235,7 +292,7 @@ class InitialExplorationTests(unittest.IsolatedAsyncioTestCase):
         original_edit = self.event.edit_original_response.side_effect
 
         async def edit(**kwargs):
-            if kwargs.get("view", True) is None:
+            if isinstance(kwargs.get("view"), TreasureResultView):
                 raise RuntimeError("Discord unavailable")
             return await original_edit(**kwargs)
 
@@ -248,7 +305,7 @@ class InitialExplorationTests(unittest.IsolatedAsyncioTestCase):
         retry = interaction()
         await self.view.act(retry, True)
         self.assertTrue(self.view.is_finished())
-        self.assertIsNone(retry.edit_original_response.call_args.kwargs["view"])
+        self.assertIsInstance(retry.edit_original_response.call_args.kwargs["view"], TreasureResultView)
         self.assertEqual(self.session.exploration_count, 1)
         self.progress.assert_awaited_once()
         self.release.assert_awaited_once()

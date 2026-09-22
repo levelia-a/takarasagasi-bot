@@ -22,6 +22,7 @@ from services.progress_service import ProgressService
 from services.schema_service import SchemaService
 from services.settings_service import SettingsService
 from services.treasure_service import TreasureAlreadyActive, TreasureService
+from tests.treasure_fixtures import install_test_catalog
 
 
 @unittest.skipUnless(
@@ -29,6 +30,7 @@ from services.treasure_service import TreasureAlreadyActive, TreasureService
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.catalog = install_test_catalog(self)
         with patch.dict(os.environ, {"MYSQL_URL": os.environ["TAKARA_TEST_MYSQL_URL"]}):
             config = DatabaseConfig.from_env()
         await DbService.connect(config)
@@ -89,7 +91,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["user_id"], 1545489116127559682)
         self.assertEqual(rows[0]["user_name"], "参加者🌟")
-        self.assertEqual(rows[0]["final_reward"], 2468)
+        self.assertEqual(rows[0]["start_price"], 1234)
+        self.assertEqual(rows[0]["final_reward"], 700)
         await SettingsService.update(
             {"test_mode": "always_fail"}, 1, "admin", "テスト変更"
         )
@@ -98,7 +101,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await TreasureService.explore(test_session)
         summary = await AdminService.statistics()
         self.assertEqual(
-            (summary["total"], summary["consumed"], summary["payout"]), (1, 1234, 2468)
+            (summary["total"], summary["consumed"], summary["payout"]), (1, 1234, 700)
         )
         self.assertEqual(await AdminService.delete_test(1, "admin"), 1)
         self.assertEqual(len(await AdminService.history()), 1)
@@ -178,7 +181,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(session.exploration_count, 3)
         self.assertEqual(session.success_count, 3)
-        self.assertEqual(session.reward, 8000)
+        self.assertEqual(session.reward, 2100)
+        self.assertEqual(len(session.found_treasures), 3)
         self.assertEqual(session.result, "max_success")
         progress = await ProgressService.get_exploration_counts(user_id)
         self.assertEqual(progress["beginner_explorations"], 3)
@@ -320,7 +324,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(
             (rows[0]["result"], rows[0]["success_count"], rows[0]["final_reward"]),
-            ("retreat", 1, 2000),
+            ("retreat", 1, 700),
         )
 
     async def test_commit_ack_loss_then_retreat_does_not_double_count(self):
@@ -350,7 +354,8 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         )
         rows = await AdminService.history()
         self.assertEqual(len(rows), 1)
-        self.assertEqual((rows[0]["success_count"], rows[0]["final_reward"]), (1, 2000))
+        self.assertEqual((rows[0]["success_count"], rows[0]["final_reward"]), (1, 700))
+        self.assertEqual(len(session.found_treasures), 1)
 
     async def test_owner_row_stays_locked_during_progress_and_result_writes(self):
         session = await TreasureService.create(123, "transaction", "beginner")
