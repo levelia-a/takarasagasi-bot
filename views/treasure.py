@@ -82,7 +82,7 @@ class ExplorationView(BaseView):
 
     async def on_timeout(self):
         """操作期限が切れた画面からボタンを取り除き、開始ロックを解放する。"""
-        await TreasureService.release_user(self.session.user_id)
+        await TreasureService.release_user(self.session.user_id, self.session.id)
         if self.message is not None:
             try:
                 await self.message.edit(
@@ -112,29 +112,40 @@ class TreasureView(BaseView):
         except DifficultyLocked as error:
             await interaction.edit_original_response(content=str(error))
             return
+        view = ExplorationView(session)
+        view_attached = False
         try:
             config = DIFFICULTIES[difficulty]
             await interaction.edit_original_response(
                 content=f"{config['emoji']} **{config['name']}宝探し**\n\n🗺️ 宝の地図を手に入れた！\n\n💰 必要LIA：**{session.price:,} LIA**"
             )
             await asyncio.sleep(1)
-            await interaction.edit_original_response(content="🔎 **探索中……**")
+            message = await interaction.edit_original_response(
+                content="🔎 **探索中……**", view=view
+            )
+            view.message = message
+            view_attached = True
             await asyncio.sleep(1.5)
             await TreasureService.explore(session)
-            view = ExplorationView(session) if session.result is None else None
+            final_view = view if session.result is None else None
             message = await interaction.edit_original_response(
-                content=exploration_text(session), view=view
+                content=exploration_text(session), view=final_view
             )
             if session.unlocked_difficulty:
                 await ProgressService.mark_unlock_notification(
                     session.user_id, session.unlocked_difficulty
                 )
                 session.unlocked_difficulty = None
-            if view:
+            if final_view:
                 view.message = message
+            else:
+                view.stop()
 
         except BaseException:
-            await TreasureService.release_user(session.user_id)
+            # Viewを表示する前の失敗だけ開始枠を解放する。
+            # 初回探索開始後は同じsession/pending IDで再操作できる状態を残す。
+            if not view_attached:
+                await TreasureService.release_user(session.user_id, session.id)
             raise
 
     @discord.ui.button(
