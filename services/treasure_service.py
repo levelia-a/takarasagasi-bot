@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from consts.treasure import DIFFICULTIES
+from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
 from services.progress_service import ProgressService
@@ -51,24 +52,33 @@ class Exploration:
 
 
 class TreasureService:
-    _active_users = set()
-    _active_users_lock = asyncio.Lock()
+    @staticmethod
+    async def _claim_user(user_id, session_id):
+        """MySQLの一意制約で、プロセスをまたいで1ユーザー1セッションを保証する。"""
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            claimed = await ActiveExplorationRepository.claim(
+                cursor, user_id, session_id
+            )
+        if not claimed:
+            raise TreasureAlreadyActive(
+                "進行中の宝探しがあります。先にその探索を完了してください。"
+            )
 
     @staticmethod
-    async def _claim_user(user_id):
-        """同一プロセス内で1ユーザー1セッションだけ開始できるようにする。"""
-        async with TreasureService._active_users_lock:
-            if user_id in TreasureService._active_users:
-                raise TreasureAlreadyActive(
-                    "進行中の宝探しがあります。先にその探索を完了してください。"
-                )
-            TreasureService._active_users.add(user_id)
+    async def _refresh_user(session):
+        """操作中セッションのDBロック期限を延長する。"""
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await ActiveExplorationRepository.refresh(
+                cursor, session.user_id, session.id
+            )
 
     @staticmethod
-    async def release_user(user_id):
-        """終了・タイムアウトしたユーザーの開始ロックを解放する。"""
-        async with TreasureService._active_users_lock:
-            TreasureService._active_users.discard(user_id)
+    async def release_user(user_id, session_id):
+        """指定セッションが所有するDBロックだけを解放する。"""
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await ActiveExplorationRepository.release(
+                cursor, user_id, session_id
+            )
 
     @staticmethod
     async def create(user_id, user_name, difficulty):
@@ -81,7 +91,8 @@ class TreasureService:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
         unlock_notice = await ProgressService.require_unlocked(user_id, difficulty, settings)
-        await TreasureService._claim_user(user_id)
+        session_id = str(uuid4())
+        await TreasureService._claim_user(user_id, session_id)
         try:
             return Exploration(
                 user_id,
@@ -91,17 +102,19 @@ class TreasureService:
                 settings[f"{difficulty}_rate"],
                 settings[f"{difficulty}_max"],
                 settings["test_mode"],
+                id=session_id,
                 unlocked_difficulty=unlock_notice,
                 settings=settings,
             )
         except BaseException:
-            await TreasureService.release_user(user_id)
+            await TreasureService.release_user(user_id, session_id)
             raise
 
     @staticmethod
     async def explore(session):
         """探索を1回進め、進捗と終了結果を整合性を保って保存する。"""
         async with session.lock:
+            await TreasureService._refresh_user(session)
             # 前回のDB保存が失敗した場合は、同じ探索を再抽選せず保存だけ再試行する。
             if session.pending_exploration_id is not None:
                 result = TreasureService.build_result(session) if session.result else None
@@ -115,12 +128,12 @@ class TreasureService:
                     session.unlocked_difficulty = unlocked
                 session.pending_exploration_id = None
                 if session.result is not None:
-                    await TreasureService.release_user(session.user_id)
+                    await TreasureService.release_user(session.user_id, session.id)
                 return session
 
             if session.result is not None:
                 await TreasureService.save_result(session)
-                await TreasureService.release_user(session.user_id)
+                await TreasureService.release_user(session.user_id, session.id)
                 return session
 
             session.exploration_count += 1
@@ -153,17 +166,31 @@ class TreasureService:
             elif session.result is not None:
                 await TreasureService.save_result(session)
             if session.result is not None:
-                await TreasureService.release_user(session.user_id)
+                await TreasureService.release_user(session.user_id, session.id)
             return session
 
     @staticmethod
     async def retreat(session):
-        """引き返して現在の報酬を確定し、結果を保存する。"""
+        """引き返し時も未確定の探索進捗と最終結果を同一transactionで確定する。"""
         async with session.lock:
+            await TreasureService._refresh_user(session)
             if session.result is None:
                 session.result = "retreat"
-            await TreasureService.save_result(session)
-            await TreasureService.release_user(session.user_id)
+
+            if not session.is_test and session.pending_exploration_id is not None:
+                unlocked = await ProgressService.record_exploration(
+                    session.user_id,
+                    session.difficulty,
+                    session.pending_exploration_id,
+                    TreasureService.build_result(session),
+                )
+                if unlocked:
+                    session.unlocked_difficulty = unlocked
+                session.pending_exploration_id = None
+            else:
+                await TreasureService.save_result(session)
+
+            await TreasureService.release_user(session.user_id, session.id)
             return session
 
     @staticmethod
