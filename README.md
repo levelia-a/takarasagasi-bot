@@ -54,7 +54,7 @@ cp .env.example .env
 
 宝探しBot専用のMySQLデータベースを用意し、RailwayのMySQLターミナルで
 `database/tables.py` の `TABLES_SQL` 内のSQLを手動実行してください。
-作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`unlock_notifications`・`admin_logs` の6つです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` はDB確定結果が不明な再試行でも二重加算しないため、探索単位のIDを冪等性キーとして保持します。正常完了直後には削除しません。`unlock_notifications` は解放判定には使わず、Discordへの解放通知が実際に表示された後で通知済みとして記録します。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
+作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`unlock_notifications`・`active_explorations`・`admin_logs` の7つです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` はDB確定結果が不明な再試行でも二重加算しないため、探索単位のIDを冪等性キーとして保持します。正常完了直後には削除しません。`unlock_notifications` は解放判定には使わず、Discordへの解放通知が実際に表示された後で通知済みとして記録します。`active_explorations` はユーザーIDを主キーにした5分期限の開始枠で、複数Botプロセスが一時的に重なっても同じユーザーの同時進行を防ぎます。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
 その後、`.env` に接続情報を設定してください。
 他BotのDBには接続しないでください。`settings` など汎用名のテーブルを使用します。
 
@@ -85,7 +85,7 @@ python -X pycache_prefix=.cache/pycache main.py
 設定はPython起動前に必要なため、Botが読み込む `.env` には記載しません。
 参照: [Pythonのキャッシュ保存先設定](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPYCACHEPREFIX)。
 
-起動時はMySQLへ接続した直後に必須6テーブルの存在を検査し、不足があれば不足テーブル名を示して起動を中止します。テーブル作成・変更・データ移行は行いません。
+起動時はMySQLへ接続した直後に必須7テーブルの存在に加え、難易度解放で重要な列・PRIMARY KEY・InnoDBを検査し、不一致があれば起動を中止します。テーブル作成・変更・データ移行は行いません。
 `settings` は空の状態でも使用できます。未登録項目は `consts/treasure.py` の初期値を使い、管理画面で変更した項目をDBに保存します。
 Bot用DBユーザーには専用DBの `SELECT / INSERT / UPDATE / DELETE` 権限が必要です。
 テーブルを手動作成するユーザーには別途 `CREATE` 権限が必要です。
@@ -126,7 +126,7 @@ Bot側に `DISCORD_TOKEN`、`GUILD_ID`、`MYSQLHOST`・`MYSQLPORT`・`MYSQLUSER`
 `GUILD_ID` は省略可能です。MySQL接続には個別設定の代わりに `MYSQL_URL` も使用できます（指定時は優先）。
 `railway.json` の起動コマンドは `python -X pycache_prefix=.cache/pycache main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
-デプロイ前に必ず `database/tables.py` のSQLを先に実行し、6テーブルが存在することを確認してからBotコードを更新してください。スキーマ未更新なら起動時検査でBotが停止し、不足テーブル名をログの例外で確認できます。
+デプロイ前に必ず `database/tables.py` のSQLを先に実行し、7テーブルが正しい定義で存在することを確認してからBotコードを更新してください。スキーマ未更新なら起動時検査でBotが停止し、不足テーブル名をログの例外で確認できます。
 コマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
 
 起動しない場合はRailwayのBuild Logsで依存関係の導入、Deploy Logsで必須変数・MySQL接続・テーブル権限・Discord認証・コマンド同期を確認してください。
