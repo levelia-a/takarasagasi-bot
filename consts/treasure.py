@@ -1,4 +1,7 @@
+from consts.balance import BALANCE_DEFAULTS
+
 DEFAULT_SETTINGS = {
+    **BALANCE_DEFAULTS,
     "beginner_price": 1000,
     "beginner_rate": 60,
     "beginner_max": 5,

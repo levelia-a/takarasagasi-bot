@@ -106,13 +106,15 @@ class TreasureCatalogService:
             raise TreasureCatalogError("宝物の最大合計価値がMySQLの保存上限（65桁）を超えています。")
 
     @staticmethod
-    def draw(treasures, exploration_color='blue'):
+    def draw(treasures, exploration_color='blue', settings=None):
         """百分率を整数の重みに変換し、浮動小数点の丸めなしに復元抽出する。"""
         if not treasures:
             raise TreasureCatalogError("宝物設定が未完了です。")
-        scale = lcm(*(t.probability.denominator for t in treasures))
-        multiplier = EXPLORATION_COLORS[exploration_color]['rare_multiplier']
-        weights = [int(t.probability * scale) * (1 if t.rarity == 'normal' else multiplier) for t in treasures]
+        multiplier = (Fraction(settings[f'color_{exploration_color}_multiplier'], 100) if settings
+                      else EXPLORATION_COLORS[exploration_color]['rare_multiplier'])
+        probabilities = [t.probability * (1 if t.rarity == 'normal' else multiplier) for t in treasures]
+        scale = lcm(*(p.denominator for p in probabilities))
+        weights = [int(p * scale) for p in probabilities]
         ticket = random.randrange(sum(weights))
         for treasure, weight in zip(treasures, weights):
             if ticket < weight:

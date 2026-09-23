@@ -187,7 +187,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                     found = tuple(session.found_treasures)
                     self.roll = 100
                     await TreasureService.explore(session)
-                    draw.assert_called_once_with(session.treasure_pool, session.exploration_color)
+                    draw.assert_called_once_with(session.treasure_pool, session.exploration_color, session.settings)
                 self.assertEqual(tuple(session.found_treasures), found)
                 self.assertEqual((session.reward, session.exploration_count), (800, 1))
                 self.assertEqual(self.progress.await_args.args[2], pending)

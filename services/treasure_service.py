@@ -9,6 +9,7 @@ from consts.treasure import DIFFICULTIES
 from consts.maps import MAPS
 from services.map_service import MapService
 from services.exploration_color_service import ExplorationColorService
+from services.balance_service import BalanceService
 from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
@@ -103,6 +104,7 @@ class TreasureService:
         settings = await SettingsService.get_all()
         catalog = TreasureCatalogService.load_catalog()
         SettingsService.validate_settings(settings, catalog=catalog)
+        catalog = BalanceService.apply_catalog(catalog, settings)
         if not settings["operation"]:
             raise TreasureStopped("現在、宝探しは停止中です。")
         # 難易度解放システム：中級・上級は開始前にユーザー進捗を確認する。
@@ -113,13 +115,13 @@ class TreasureService:
         session_id = str(uuid4())
         await TreasureService._claim_user(user_id, session_id)
         try:
-            map_tier = MapService.draw()
+            map_tier = MapService.draw(settings)
             return Exploration(
                 user_id,
                 user_name,
                 difficulty,
                 settings[f"{difficulty}_price"],
-                min(100, settings[f"{difficulty}_rate"] + MAPS[map_tier]['bonus']),
+                min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0)),
                 settings[f"{difficulty}_max"],
                 settings["test_mode"],
                 id=session_id,
@@ -158,12 +160,12 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
 
-            exploration_color = ExplorationColorService.draw()
+            exploration_color = ExplorationColorService.draw(session.settings)
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
             # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
-            treasure = TreasureCatalogService.draw(session.treasure_pool, exploration_color) if success else None
+            treasure = TreasureCatalogService.draw(session.treasure_pool, exploration_color, session.settings) if success else None
             session.exploration_color = exploration_color
             session.exploration_count += 1
             if success:

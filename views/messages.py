@@ -12,7 +12,8 @@ def exploration_embed(session):
     description = exploration_text(session)
     description += f"\n\n🗺️ 使用地図：{current['name']}\n🎯 今回の成功率：{session.rate}%"
     description += f"\n🎨 今回の探索色：{bonus['name']}"
-    if bonus['rare_multiplier'] > 1:
+    multiplier = session.settings.get(f'color_{session.exploration_color}_multiplier', bonus['rare_multiplier'] * 100) / 100
+    if multiplier > 1:
         description += '\n✨ この探索ではレア以上の宝物が出やすくなります。'
     return discord.Embed(title='🗺️ 宝探し', description=description, color=color)
 
@@ -21,11 +22,12 @@ def map_start_embed(session):
     info = MAPS[session.map_tier]
     prefix = {'normal': '', 'copper': '銅の', 'silver': '銀の', 'gold': '金の'}[session.map_tier]
     name = f"{prefix}{session.difficulty_name}の宝の地図"
+    map_bonus = session.settings.get(f'map_{session.map_tier}_bonus', info['bonus'])
     return discord.Embed(
         title=f"✨ {name}を手に入れた！",
         description=(f"{session.difficulty_name}宝探し\n\n💰 必要LIA：**{session.price:,} LIA**\n"
                      f"🎯 成功率：**{session.rate}%**\n"
-                     f"地図の効果：+{info['bonus']}ポイント（上限100%）\n"
+                     f"地図の効果：+{map_bonus}ポイント（上限100%）\n"
                      "この宝探しの全探索判定に適用されます。"),
         color=info['color'],
     )

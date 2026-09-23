@@ -29,6 +29,30 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_balance_settings_persist_and_only_affect_new_games(self):
+        with patch('services.treasure_service.MapService.draw', return_value='gold'):
+            first = await TreasureService.create(801, 'old', 'beginner')
+            await SettingsService.update({
+                'map_gold_bonus': 30, 'color_green_multiplier': 250,
+                'rarity_profile_enabled': 1,
+                'treasure_beginner_probabilities': '15,15,15,15,15,8,7,5,4,1',
+            }, 1, 'admin', 'バランス変更')
+            restored = await SettingsService.get_all()
+            self.assertEqual(restored['color_green_multiplier'], 250)
+            self.assertEqual(restored['treasure_beginner_probabilities'], '15,15,15,15,15,8,7,5,4,1')
+            second = await TreasureService.create(802, 'new', 'beginner')
+        self.assertEqual(first.rate, 80)
+        self.assertEqual(second.rate, 90)
+        self.assertEqual(first.settings['color_green_multiplier'], 200)
+        self.assertEqual(second.settings['color_green_multiplier'], 250)
+        self.assertEqual(sum(t.probability for t in second.treasure_pool if t.rarity == 'normal'), 75)
+        self.assertEqual(first.treasure_pool[0].probability, 10)
+        self.assertEqual(len(await AdminService.admin_logs()), 1)
+        with self.assertRaises(ValueError):
+            await SettingsService.update({'color_red_chance': 301}, 1, 'admin', 'invalid')
+        self.assertEqual((await SettingsService.get_all())['color_red_chance'], 300)
+        self.assertEqual(len(await AdminService.admin_logs()), 1)
+
     async def test_history_user_filter_covers_all_pages_and_test_records(self):
         async with DbService.get_connection() as connection, connection.cursor() as cursor:
             for i in range(24):
