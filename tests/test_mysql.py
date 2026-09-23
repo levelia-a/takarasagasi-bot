@@ -29,6 +29,30 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_history_pages_remain_stable_after_new_record(self):
+        async def insert_result(cursor, i):
+            await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, dict(
+                session_id=f'history-{i}', user_id=1, user_name='user', difficulty='初級',
+                start_price=0, success_count=1, final_reward=100, result='retreat',
+                failure_point=None, is_test=i % 2,
+            ))
+        self.assertEqual(await AdminService.history_page(), ([], False))
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for i in range(21):
+                await insert_result(cursor, i)
+        first, more = await AdminService.history_page()
+        self.assertEqual(len(first), 10)
+        self.assertTrue(more)
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await insert_result(cursor, 21)
+        second, more = await AdminService.history_page(first[-1]['id'])
+        self.assertEqual(len(second), 10)
+        self.assertTrue(more)
+        third, more = await AdminService.history_page(second[-1]['id'])
+        self.assertEqual(len(third), 1)
+        self.assertFalse(more)
+        self.assertEqual(len({r['id'] for r in first + second + third}), 21)
+
     async def test_rankings_aggregate_and_persist_panel(self):
         from services.ranking_service import RankingService
         async with DbService.get_connection() as connection, connection.cursor() as cursor:

@@ -4,7 +4,8 @@ from consts.treasure import DIFFICULTIES, TEST_MODES
 from services.admin_service import AdminService
 from services.settings_service import SettingsService
 from views.common import AdminOnlyModal, AdminOnlyView, send_pages
-from views.messages import history_entries, log_entries, settings_text, statistics_text
+from views.messages import log_entries, settings_text, statistics_text
+from views.history import show_history
 
 
 class SettingsModal(AdminOnlyModal):
@@ -222,9 +223,8 @@ class AdminView(AdminOnlyView):
         label="履歴", emoji="📜", style=discord.ButtonStyle.secondary, row=2
     )
     async def history_button(self, interaction, button):
-        """最新の宝探し履歴を文字数制限に合わせて表示する。"""
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await send_pages(interaction, history_entries(await AdminService.history()))
+        """宝探し履歴を10件ずつ切り替える画面を表示する。"""
+        await show_history(interaction)
 
     @discord.ui.button(
         label="テストデータ削除", emoji="🧹", style=discord.ButtonStyle.danger, row=3

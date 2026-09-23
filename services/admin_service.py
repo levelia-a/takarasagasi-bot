@@ -5,6 +5,13 @@ from services.db_service import DbService
 
 class AdminService:
     @staticmethod
+    async def history_page(before_id=None):
+        """履歴10件と、さらに古い履歴が存在するかを返す。"""
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            rows = await ResultRepository.get_statistics_page_before_id(cursor, before_id)
+        return list(rows[:10]), len(rows) > 10
+
+    @staticmethod
     async def statistics():
         # 合計と難易度別の件数を同じスナップショットから取得する。
         """テスト結果を除いた全体集計と難易度別件数を返す。"""
