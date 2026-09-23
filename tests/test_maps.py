@@ -21,8 +21,16 @@ class MapTests(unittest.TestCase):
                 embed = map_start_embed(session)
                 self.assertIn(f'{prefix}{label}の宝の地図を手に入れた！', embed.title)
                 self.assertEqual(embed.color.value, MAPS[tier]['color'])
+                session.exploration_count = 1
                 session.result = 'failure'
                 self.assertEqual(exploration_embed(session).color.value, MAPS[tier]['color'])
+                session.exploration_count = 2
+                for result in (None, 'failure', 'retreat', 'max_success'):
+                    session.result = result
+                    later = exploration_embed(session)
+                    self.assertEqual(later.color.value, MAPS['normal']['color'])
+                    self.assertIn('今回の成功率：75%', later.description)
+                self.assertEqual(session.map_tier, tier)
                 with patch.object(MapService, 'draw') as draw:
                     TreasureService.build_result(session)
                     draw.assert_not_called()

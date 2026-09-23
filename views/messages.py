@@ -6,7 +6,7 @@ from consts.maps import MAPS
 
 def exploration_embed(session):
     current = MAPS[session.map_tier]
-    color = current['color']
+    color = current['color'] if session.exploration_count <= 1 else MAPS['normal']['color']
     description = exploration_text(session)
     description += f"\n\n🗺️ 使用地図：{current['name']}\n🎯 今回の成功率：{session.rate}%"
     return discord.Embed(title='🗺️ 宝探し', description=description, color=color)
