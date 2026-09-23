@@ -2,13 +2,18 @@ import discord
 
 from consts.treasure import DIFFICULTIES, RESULT_NAMES, TEST_MODES
 from consts.maps import MAPS
+from consts.rarity import RARITIES, EXPLORATION_COLORS
 
 
 def exploration_embed(session):
     current = MAPS[session.map_tier]
-    color = current['color'] if session.exploration_count <= 1 else MAPS['normal']['color']
+    bonus = EXPLORATION_COLORS[session.exploration_color]
+    color = bonus['color']
     description = exploration_text(session)
     description += f"\n\n🗺️ 使用地図：{current['name']}\n🎯 今回の成功率：{session.rate}%"
+    description += f"\n🎨 今回の探索色：{bonus['name']}"
+    if bonus['rare_multiplier'] > 1:
+        description += '\n✨ この探索ではレア以上の宝物が出やすくなります。'
     return discord.Embed(title='🗺️ 宝探し', description=description, color=color)
 
 
@@ -79,7 +84,7 @@ def exploration_text(session):
     discovery = ""
     if session.found_treasures and session.result in (None, "max_success"):
         treasure = session.found_treasures[-1]
-        discovery = f"{treasure_name(treasure.name)}\n💰 価値：**{treasure.price:,} LIA**\n\n"
+        discovery = f"{treasure_name(treasure.name)}【{RARITIES[treasure.rarity]}】\n💰 価値：**{treasure.price:,} LIA**\n\n"
     text = (
         f"{title}\n\n{session.difficulty_name}宝探し\n"
         f"{discovery}"
@@ -102,7 +107,7 @@ def treasure_pages(found_treasures, lost=False):
     """一覧を行単位で分割する。絵文字もUTF-16単位で数え、2000文字に余裕を残す。"""
     heading = "🎒 **失った宝物一覧**" if lost else "🎒 **発見した宝物一覧**"
     lines = [
-        f"探索{item.exploration_number}回目：{treasure_name(item.name)} — {item.price:,} LIA\n"
+        f"探索{item.exploration_number}回目：{treasure_name(item.name)}【{RARITIES[item.rarity]}】 — {item.price:,} LIA\n"
         for item in found_treasures
     ] or ["宝物はありません。\n"]
     pages, page = [], heading + "\n\n"

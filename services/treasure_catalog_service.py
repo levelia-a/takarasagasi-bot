@@ -9,6 +9,7 @@ from math import lcm
 from pathlib import Path
 
 from consts.treasure import DIFFICULTIES, MAX_REWARD
+from consts.rarity import RARITIES, EXPLORATION_COLORS
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "treasures.json"
 
@@ -24,6 +25,7 @@ class Treasure:
     price: int
     probability: Fraction
     difficulty: str
+    rarity: str = 'normal'
 
 
 def _unique_object(pairs):
@@ -60,8 +62,12 @@ class TreasureCatalogService:
                 raise TreasureCatalogError(f"{difficulty}: 宝物は10種類、未設定なら空配列にしてください。")
             treasures = []
             for row in rows:
-                if not isinstance(row, dict) or row.keys() != {"id", "name", "price", "probability_percent"}:
+                required = {"id", "name", "price", "probability_percent"}
+                if not isinstance(row, dict) or not required <= row.keys() or row.keys() - required - {'rarity'}:
                     raise TreasureCatalogError(f"{difficulty}: 宝物の項目が不正です。")
+                rarity = row.get('rarity', 'normal')
+                if not isinstance(rarity, str) or rarity not in RARITIES:
+                    raise TreasureCatalogError('宝物のレア度はnormal・rare・epic・legendaryで指定してください。')
                 key, name, price = row["id"], row["name"], row["price"]
                 if not isinstance(key, str) or not key.strip() or len(key) > 80 or key in keys:
                     raise TreasureCatalogError("宝物IDは重複しない1〜80文字で設定してください。")
@@ -79,7 +85,7 @@ class TreasureCatalogService:
                 except (InvalidOperation, ValueError):
                     raise TreasureCatalogError("出現確率は0〜100の有限な百分率にしてください。") from None
                 keys.add(key)
-                treasures.append(Treasure(key, name, price, Fraction(probability), difficulty))
+                treasures.append(Treasure(key, name, price, Fraction(probability), difficulty, rarity))
             if treasures and sum(t.probability for t in treasures) != 100:
                 raise TreasureCatalogError(f"{difficulty}: 出現確率の合計を100%にしてください。")
             catalog[difficulty] = tuple(treasures)
@@ -100,12 +106,13 @@ class TreasureCatalogService:
             raise TreasureCatalogError("宝物の最大合計価値がMySQLの保存上限（65桁）を超えています。")
 
     @staticmethod
-    def draw(treasures):
+    def draw(treasures, exploration_color='blue'):
         """百分率を整数の重みに変換し、浮動小数点の丸めなしに復元抽出する。"""
         if not treasures:
             raise TreasureCatalogError("宝物設定が未完了です。")
         scale = lcm(*(t.probability.denominator for t in treasures))
-        weights = [int(t.probability * scale) for t in treasures]
+        multiplier = EXPLORATION_COLORS[exploration_color]['rare_multiplier']
+        weights = [int(t.probability * scale) * (1 if t.rarity == 'normal' else multiplier) for t in treasures]
         ticket = random.randrange(sum(weights))
         for treasure, weight in zip(treasures, weights):
             if ticket < weight:

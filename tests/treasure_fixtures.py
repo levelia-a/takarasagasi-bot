@@ -10,6 +10,7 @@ def catalog_data():
     return {
         difficulty: [
             {"id": f"test_{difficulty}_{i}", "name": f"テスト専用宝物{i}",
+             "rarity": 'normal' if i < 5 else 'rare' if i < 8 else 'epic' if i == 8 else 'legendary',
              "price": 700 + level * 1000 + i * 100, "probability_percent": "10"}
             for i in range(10)
         ]
@@ -18,6 +19,7 @@ def catalog_data():
 
 
 def install_test_catalog(test_case):
+    test_case.enterContext(patch('services.exploration_color_service.ExplorationColorService.draw', return_value='blue'))
     catalog = TreasureCatalogService.validate_catalog(catalog_data())
     test_case.enterContext(patch.object(TreasureCatalogService, "load_catalog", return_value=catalog))
     test_case.enterContext(patch("services.treasure_catalog_service.random.randrange", return_value=0))

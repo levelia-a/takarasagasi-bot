@@ -82,6 +82,24 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
     async def create(self):
         return await TreasureService.create(1545489116127559681, "テスト🌟", "beginner")
 
+    async def test_color_changes_per_step_but_not_save_retry_or_retreat(self):
+        session = await self.create()
+        self.progress.side_effect = [RuntimeError('save failed'), None, None]
+        with patch('services.treasure_service.ExplorationColorService.draw', side_effect=['red', 'green']) as colors:
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+            first_treasure = session.found_treasures[0]
+            self.assertEqual(session.exploration_color, 'red')
+            await TreasureService.explore(session)
+            self.assertEqual(session.exploration_color, 'red')
+            self.assertIs(session.found_treasures[0], first_treasure)
+            self.assertEqual(colors.call_count, 1)
+            await TreasureService.explore(session)
+            self.assertEqual(session.exploration_color, 'green')
+            await TreasureService.retreat(session)
+            self.assertEqual(colors.call_count, 2)
+            self.assertEqual(session.rate, 60)
+
     async def test_map_draw_at_start_applies_to_whole_session_and_caps_rate(self):
         for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 80)):
             with patch('services.treasure_service.MapService.draw', return_value=tier) as draw:
@@ -169,7 +187,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                     found = tuple(session.found_treasures)
                     self.roll = 100
                     await TreasureService.explore(session)
-                    draw.assert_called_once_with(session.treasure_pool)
+                    draw.assert_called_once_with(session.treasure_pool, session.exploration_color)
                 self.assertEqual(tuple(session.found_treasures), found)
                 self.assertEqual((session.reward, session.exploration_count), (800, 1))
                 self.assertEqual(self.progress.await_args.args[2], pending)

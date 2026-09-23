@@ -8,6 +8,7 @@ from uuid import uuid4
 from consts.treasure import DIFFICULTIES
 from consts.maps import MAPS
 from services.map_service import MapService
+from services.exploration_color_service import ExplorationColorService
 from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
@@ -30,6 +31,7 @@ class FoundTreasure:
     name: str
     price: int
     exploration_number: int
+    rarity: str = 'normal'
 
 
 @dataclass
@@ -51,6 +53,7 @@ class Exploration:
     unlocked_difficulty: str | None = None
     pending_exploration_id: str | None = None
     map_tier: str = 'normal'
+    exploration_color: str = 'blue'
     settings: dict = field(default_factory=dict, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
@@ -155,15 +158,17 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
 
+            exploration_color = ExplorationColorService.draw()
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
             # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
-            treasure = TreasureCatalogService.draw(session.treasure_pool) if success else None
+            treasure = TreasureCatalogService.draw(session.treasure_pool, exploration_color) if success else None
+            session.exploration_color = exploration_color
             session.exploration_count += 1
             if success:
                 session.found_treasures.append(FoundTreasure(
-                    treasure.key, treasure.name, treasure.price, session.exploration_count
+                    treasure.key, treasure.name, treasure.price, session.exploration_count, treasure.rarity
                 ))
                 session.success_count += 1
                 session.reward = sum(item.price for item in session.found_treasures)
