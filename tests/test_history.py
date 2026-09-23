@@ -12,6 +12,35 @@ def record(i):
 
 
 class HistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_user_search_pagination_switch_and_clear(self):
+        view = HistoryView(1, [record(100)], False)
+        event = interaction(admin=True)
+        with patch('views.history.AdminService.history_page', new_callable=AsyncMock,
+                   side_effect=[([record(30)], True), ([record(20)], False), ([], False), ([record(100)], False)]) as fetch:
+            await view.filter_user(event, 7)
+            fetch.assert_awaited_with(user_id=7)
+            await view.turn_page(event, 1)
+            fetch.assert_awaited_with(30, user_id=7)
+            await view.filter_user(event, 8)
+            self.assertEqual(view.page, 0)
+            self.assertEqual(len(view.pages), 1)
+            self.assertEqual(view.target_user_id, 8)
+            self.assertTrue(view.next.disabled)
+            self.assertIn('ID: 8', event.edit_original_response.call_args.kwargs['embed'].description)
+            await view.filter_user(event, None)
+            self.assertIsNone(view.target_user_id)
+            self.assertEqual(view.pages[0][0][0]['id'], 100)
+
+    async def test_failed_user_search_keeps_previous_filter_and_page(self):
+        view = HistoryView(1, [record(100)], False)
+        event = interaction(admin=True)
+        event.edit_original_response.side_effect = RuntimeError('offline')
+        with patch('views.history.AdminService.history_page', new_callable=AsyncMock, return_value=([record(1)], False)):
+            with self.assertRaises(RuntimeError):
+                await view.filter_user(event, 7)
+        self.assertIsNone(view.target_user_id)
+        self.assertEqual(view.pages[0][0][0]['id'], 100)
+
     async def test_next_previous_and_final_page(self):
         view = HistoryView(1, [record(i) for i in range(21, 11, -1)], True)
         event = interaction(admin=True)

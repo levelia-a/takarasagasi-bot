@@ -9,10 +9,11 @@ from views.common import AdminOnlyView
 from views.messages import RESULT_NAMES
 
 
-def history_embed(rows, page):
+def history_embed(rows, page, target_user_id=None):
     embed = discord.Embed(title="📜 宝探し履歴", color=discord.Color.gold())
+    embed.description = f"検索対象：<@{target_user_id}>（ID: {target_user_id}）" if target_user_id is not None else "検索対象：全ユーザー"
     if not rows:
-        embed.description = "まだ履歴はありません。"
+        embed.description += "\nまだ履歴はありません。"
     for row in rows:
         # 最大長のユーザー名・65桁の金額でも10件をDiscordの制限内に収める。
         name = row['user_name']
@@ -35,6 +36,7 @@ class HistoryView(AdminOnlyView):
     def __init__(self, user_id, rows, has_next):
         super().__init__(timeout=300)
         self.user_id = user_id
+        self.target_user_id = None
         self.pages = [(rows, has_next)]
         self.page = 0
         self.lock = asyncio.Lock()
@@ -60,7 +62,8 @@ class HistoryView(AdminOnlyView):
             if target < 0 or (step > 0 and not self.pages[self.page][1]):
                 return
             if target == len(self.pages):
-                rows, has_next = await AdminService.history_page(self.pages[self.page][0][-1]['id'])
+                filters = {'user_id': self.target_user_id} if self.target_user_id is not None else {}
+                rows, has_next = await AdminService.history_page(self.pages[self.page][0][-1]['id'], **filters)
                 if not rows:
                     # 閲覧中にテスト履歴が削除され、続きがなくなった場合。
                     self.pages[self.page] = (self.pages[self.page][0], False)
@@ -73,13 +76,38 @@ class HistoryView(AdminOnlyView):
             self.update_buttons()
             try:
                 await interaction.edit_original_response(
-                    embed=history_embed(self.pages[target][0], target), view=self,
+                    embed=history_embed(self.pages[target][0], target, self.target_user_id), view=self,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except BaseException:
                 self.page = previous
                 self.update_buttons()
                 raise
+
+    async def filter_user(self, interaction, target_user_id):
+        await interaction.response.defer()
+        async with self.lock:
+            rows, has_next = await AdminService.history_page(user_id=target_user_id)
+            old_state = self.pages, self.page, self.target_user_id
+            self.pages, self.page, self.target_user_id = [(rows, has_next)], 0, target_user_id
+            self.update_buttons()
+            try:
+                await interaction.edit_original_response(
+                    embed=history_embed(rows, 0, target_user_id), view=self,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except BaseException:
+                self.pages, self.page, self.target_user_id = old_state
+                self.update_buttons()
+                raise
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="履歴を検索するユーザーを選択", min_values=1, max_values=1, row=1)
+    async def user_search(self, interaction, select):
+        await self.filter_user(interaction, select.values[0].id)
+
+    @discord.ui.button(label="全ユーザー", style=discord.ButtonStyle.secondary, row=0)
+    async def all_users(self, interaction, button):
+        await self.filter_user(interaction, None)
 
     @discord.ui.button(label="前へ", style=discord.ButtonStyle.secondary)
     async def previous(self, interaction, button):

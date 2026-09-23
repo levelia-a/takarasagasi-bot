@@ -5,10 +5,10 @@ from services.db_service import DbService
 
 class AdminService:
     @staticmethod
-    async def history_page(before_id=None):
+    async def history_page(before_id=None, user_id=None):
         """履歴10件と、さらに古い履歴が存在するかを返す。"""
         async with DbService.get_connection() as connection, connection.cursor() as cursor:
-            rows = await ResultRepository.get_statistics_page_before_id(cursor, before_id)
+            rows = await ResultRepository.get_statistics_page_before_id(cursor, before_id, user_id)
         return list(rows[:10]), len(rows) > 10
 
     @staticmethod

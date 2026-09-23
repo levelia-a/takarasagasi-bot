@@ -29,6 +29,26 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_history_user_filter_covers_all_pages_and_test_records(self):
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for i in range(24):
+                await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, dict(
+                    session_id=f'filtered-{i}', user_id=7 if i % 2 else 8,
+                    user_name='same-name', difficulty='初級', start_price=0,
+                    success_count=1, final_reward=100, result='retreat',
+                    failure_point=None, is_test=(i // 2) % 2,
+                ))
+        first, more = await AdminService.history_page(user_id=7)
+        self.assertEqual(len(first), 10)
+        self.assertTrue(more)
+        second, more = await AdminService.history_page(first[-1]['id'], user_id=7)
+        self.assertEqual(len(second), 2)
+        self.assertFalse(more)
+        self.assertEqual({r['user_id'] for r in first + second}, {7})
+        self.assertEqual({r['is_test'] for r in first + second}, {0, 1})
+        self.assertEqual(len({r['id'] for r in first + second}), 12)
+        self.assertEqual(await AdminService.history_page(user_id=999), ([], False))
+
     async def test_history_pages_remain_stable_after_new_record(self):
         async def insert_result(cursor, i):
             await ResultRepository.insert_statistics_record_if_session_id_not_exists(cursor, dict(

@@ -1,14 +1,19 @@
 class ResultRepository:
     @staticmethod
-    async def get_statistics_page_before_id(cursor, before_id=None):
+    async def get_statistics_page_before_id(cursor, before_id=None, user_id=None):
         """次ページ判定用の1件を含め、新しい順に最大11件取得する。"""
-        if before_id is None:
-            await cursor.execute("SELECT * FROM statistics ORDER BY id DESC LIMIT 11")
-        else:
-            await cursor.execute(
-                "SELECT * FROM statistics WHERE id < %s ORDER BY id DESC LIMIT 11",
-                (before_id,),
-            )
+        conditions, params = [], []
+        if before_id is not None:
+            conditions.append("id < %s")
+            params.append(before_id)
+        if user_id is not None:
+            conditions.append("user_id = %s")
+            params.append(user_id)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        await cursor.execute(
+            "SELECT * FROM statistics" + where + " ORDER BY id DESC LIMIT 11",
+            tuple(params),
+        )
         return await cursor.fetchall()
 
     @staticmethod
