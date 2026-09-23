@@ -83,7 +83,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         return await TreasureService.create(1545489116127559681, "テスト🌟", "beginner")
 
     async def test_map_draw_at_start_applies_to_whole_session_and_caps_rate(self):
-        for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 75)):
+        for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 80)):
             with patch('services.treasure_service.MapService.draw', return_value=tier) as draw:
                 session = await self.create()
                 self.assertEqual((session.map_tier, session.rate), (tier, expected))
