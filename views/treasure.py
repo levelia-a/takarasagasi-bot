@@ -12,7 +12,7 @@ from services.treasure_service import (
     TreasureStopped,
 )
 from views.common import BaseView
-from views.messages import exploration_text
+from views.messages import exploration_embed, map_start_embed
 from views.treasure_inventory import TreasureResultView, show_treasure_list
 
 
@@ -45,7 +45,7 @@ class ExplorationView(BaseView):
             await interaction.response.defer()
             if deeper or self.session.exploration_count == 0:
                 await interaction.edit_original_response(
-                    content="🔎 **さらに奥を探索中……**", view=self
+                    content="🔎 **さらに奥を探索中……**", embed=None, view=self
                 )
                 await asyncio.sleep(1.5)
                 await TreasureService.explore(self.session)
@@ -63,7 +63,7 @@ class ExplorationView(BaseView):
         finished = self.session.result is not None
         display_view = TreasureResultView(self.session) if finished else self
         self.message = await interaction.edit_original_response(
-            content=exploration_text(self.session), view=display_view,
+            content=None, embed=exploration_embed(self.session), view=display_view,
             allowed_mentions=discord.AllowedMentions.none(),
         )
         display_view.message = self.message
@@ -148,11 +148,11 @@ class TreasureView(BaseView):
         try:
             config = DIFFICULTIES[difficulty]
             await interaction.edit_original_response(
-                content=f"{config['emoji']} **{config['name']}宝探し**\n\n🗺️ 宝の地図を手に入れた！\n\n💰 必要LIA：**{session.price:,} LIA**"
+                content=None, embed=map_start_embed(session)
             )
             await asyncio.sleep(1)
             message = await interaction.edit_original_response(
-                content="🔎 **探索中……**", view=view
+                content="🔎 **探索中……**", embed=None, view=view
             )
             view.message = message
             view_attached = True

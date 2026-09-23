@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from consts.treasure import DIFFICULTIES
+from consts.maps import MAPS
+from services.map_service import MapService
 from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
@@ -48,6 +50,7 @@ class Exploration:
     result: str | None = None
     unlocked_difficulty: str | None = None
     pending_exploration_id: str | None = None
+    map_tier: str = 'normal'
     settings: dict = field(default_factory=dict, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
@@ -107,15 +110,17 @@ class TreasureService:
         session_id = str(uuid4())
         await TreasureService._claim_user(user_id, session_id)
         try:
+            map_tier = MapService.draw()
             return Exploration(
                 user_id,
                 user_name,
                 difficulty,
                 settings[f"{difficulty}_price"],
-                settings[f"{difficulty}_rate"],
+                min(100, settings[f"{difficulty}_rate"] + MAPS[map_tier]['bonus']),
                 settings[f"{difficulty}_max"],
                 settings["test_mode"],
                 id=session_id,
+                map_tier=map_tier,
                 unlocked_difficulty=unlock_notice,
                 settings=settings,
                 treasure_pool=treasure_pool,

@@ -114,6 +114,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(entries[0].value, 10**60 + 12)
 
     async def asyncSetUp(self):
+        self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))
         self.catalog = install_test_catalog(self)
         with patch.dict(os.environ, {"MYSQL_URL": os.environ["TAKARA_TEST_MYSQL_URL"]}):
             config = DatabaseConfig.from_env()

@@ -17,6 +17,7 @@ from services.treasure_service import (
 
 class TreasureTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))
         self.catalog = install_test_catalog(self)
         self.values = DEFAULT_SETTINGS.copy()
         self.settings = AsyncMock()
@@ -80,6 +81,22 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
 
     async def create(self):
         return await TreasureService.create(1545489116127559681, "テスト🌟", "beginner")
+
+    async def test_map_draw_at_start_applies_to_whole_session_and_caps_rate(self):
+        for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 75)):
+            with patch('services.treasure_service.MapService.draw', return_value=tier) as draw:
+                session = await self.create()
+                self.assertEqual((session.map_tier, session.rate), (tier, expected))
+                await TreasureService.explore(session)
+                await TreasureService.explore(session)
+                await TreasureService.retreat(session)
+                self.assertEqual(session.rate, expected)
+                draw.assert_called_once()
+                await TreasureService.release_user(session.user_id, session.id)
+        self.values['beginner_rate'] = 95
+        with patch('services.treasure_service.MapService.draw', return_value='gold'):
+            session = await self.create()
+        self.assertEqual(session.rate, 100)
 
     async def test_success_and_retreat(self):
         session = await self.create()
