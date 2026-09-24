@@ -17,16 +17,17 @@ CREATE TABLE IF NOT EXISTS statistics (
     failure_point INT UNSIGNED NULL,
     is_test BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_statistics_test_difficulty (is_test, difficulty)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 難易度解放システム：ユーザーごとの探索回数を永続化する。
 CREATE TABLE IF NOT EXISTS user_progress (
     user_id BIGINT UNSIGNED PRIMARY KEY,
-    beginner_explorations INT UNSIGNED NOT NULL DEFAULT 0,
-    intermediate_explorations INT UNSIGNED NOT NULL DEFAULT 0,
-    intermediate_unlocked BOOLEAN NOT NULL DEFAULT FALSE,
-    advanced_unlocked BOOLEAN NOT NULL DEFAULT FALSE
+    beginner_explorations INT NOT NULL DEFAULT 0,
+    intermediate_explorations INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS admin_logs (
@@ -36,5 +37,6 @@ CREATE TABLE IF NOT EXISTS admin_logs (
     action VARCHAR(255) NOT NULL,
     detail TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 """
