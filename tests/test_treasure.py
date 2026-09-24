@@ -86,25 +86,45 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.values['beginner_max'] = 1
         with patch('services.cooperation_service.secrets.randbelow', return_value=0):
             session = await TreasureService.create(91, 'coop', 'beginner', vc_members=6)
-        self.assertEqual((session.max_exploration, session.cooperation.extra), (5, 4))
+        self.assertEqual((session.max_exploration, session.cooperation.extra), (6, 5))
         self.assertTrue(session.cooperation.event)
         pool = session.treasure_pool
-        self.values.update(coop_enabled=0, coop_event_extra=0)
-        self.progress.side_effect = [RuntimeError('save failed'), None, None, None, None, None]
+        self.values.update(coop_enabled=0, coop_event_passage_extra=0, coop_event_passage_name='変更後')
+        self.progress.side_effect = [RuntimeError('save failed'), None, None, None, None, None, None]
         with patch('services.cooperation_service.CooperationService.draw') as draw:
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
             await TreasureService.explore(session)
             self.assertEqual(session.exploration_count, 1)
             self.assertIsNone(session.result)
-            for _ in range(4):
+            for _ in range(5):
                 await TreasureService.explore(session)
             draw.assert_not_called()
-        self.assertEqual((session.result, session.success_count), ('max_success', 5))
+        self.assertEqual((session.result, session.success_count), ('max_success', 6))
+        self.assertEqual(session.cooperation.event_name, '🗺️ 隠し通路を発見！')
         self.assertIs(session.treasure_pool, pool)
-        self.assertEqual(self.progress.await_args.args[3]['success_count'], 5)
+        self.assertEqual(self.progress.await_args.args[3]['success_count'], 6)
         next_session = await TreasureService.create(92, 'solo', 'beginner', vc_members=6)
         self.assertEqual(next_session.max_exploration, 1)
+
+    async def test_guide_success_bonus_stacks_with_map_and_caps_at_100(self):
+        self.values.update(beginner_rate=80)
+        with patch('services.cooperation_service.secrets.randbelow', side_effect=[0, 7000]), patch(
+            'services.treasure_service.MapService.draw', return_value='silver'
+        ):
+            session = await TreasureService.create(93, 'guide', 'beginner', vc_members=2)
+        self.assertEqual((session.rate, session.cooperation.event_key), (95, 'guide'))
+        self.roll = 95
+        await TreasureService.explore(session)
+        self.assertEqual(session.success_count, 1)
+        self.roll = 96
+        await TreasureService.explore(session)
+        self.assertEqual(session.result, 'failure')
+        with patch('services.cooperation_service.secrets.randbelow', side_effect=[0, 7000]), patch(
+            'services.treasure_service.MapService.draw', return_value='gold'
+        ):
+            capped = await TreasureService.create(94, 'guide', 'beginner', vc_members=2)
+        self.assertEqual(capped.rate, 100)
 
     async def test_color_changes_per_step_but_not_save_retry_or_retreat(self):
         session = await self.create()

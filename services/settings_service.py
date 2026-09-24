@@ -2,6 +2,7 @@ import asyncio
 
 from consts.treasure import DEFAULT_SETTINGS, DIFFICULTIES, MAX_REWARD, TEST_MODES
 from consts.balance import CATALOG_SETTING_KEYS
+from consts.cooperation import EVENT_TEXT_KEYS
 from services.balance_service import BalanceService
 from services.cooperation_service import CooperationService
 from repositories.admin_log_repository import AdminLogRepository
@@ -51,7 +52,7 @@ class SettingsService:
         for row in rows:
             key, value = row["key"], row["value"]
             if key in settings:
-                settings[key] = value if key == "test_mode" or key in CATALOG_SETTING_KEYS else int(value)
+                settings[key] = value if key == "test_mode" or key in CATALOG_SETTING_KEYS or key in EVENT_TEXT_KEYS else int(value)
         return settings
 
     @staticmethod

@@ -125,7 +125,7 @@ class TreasureService:
                 user_name,
                 difficulty,
                 settings[f"{difficulty}_price"],
-                min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0)),
+                min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0) + cooperation.rate_bonus),
                 settings[f"{difficulty}_max"] + cooperation.extra,
                 settings["test_mode"],
                 id=session_id,

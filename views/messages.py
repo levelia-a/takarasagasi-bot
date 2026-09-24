@@ -13,7 +13,11 @@ def cooperation_text(session):
             f'探索＋{bonus.extra}回 / レア以上の重み×{float(bonus.multiplier):g}\n'
             'この宝探し全体に適用（色補正と掛け合わせ）')
     if bonus.event:
-        text += '\n🎉 **協力探索イベント発生！**（上記はイベント効果込み）'
+        name = discord.utils.escape_mentions(discord.utils.escape_markdown(bonus.event_name))
+        text += f'\n🎉 **協力探索イベント発生！ {name}**\n{bonus.event_story}'
+        if bonus.rate_bonus:
+            text += f'\n🎯 イベント成功率補正：＋{bonus.rate_bonus}ポイント（合計上限100%）'
+        text += '\n（上記の探索回数・重み・成功率はイベント効果込み）'
     return text
 
 

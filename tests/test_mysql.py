@@ -29,6 +29,24 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_event_names_effects_and_distribution_persist_atomically(self):
+        await SettingsService.update({
+            'coop_event_guide_name': '仲間の導き', 'coop_event_guide_rate': 7,
+            'coop_event_passage_share': 0, 'coop_event_presence_share': 0,
+            'coop_event_guide_share': 10000, 'coop_event_vault_share': 0,
+        }, 1, 'admin', 'イベント設定')
+        restored = await SettingsService.get_all()
+        self.assertEqual(restored['coop_event_guide_name'], '仲間の導き')
+        with patch('services.cooperation_service.secrets.randbelow', return_value=0), patch(
+            'services.treasure_service.MapService.draw', return_value='normal'
+        ):
+            session = await TreasureService.create(903, 'events', 'beginner', vc_members=2)
+        self.assertEqual((session.rate, session.cooperation.event_name), (67, '仲間の導き'))
+        with self.assertRaises(ValueError):
+            await SettingsService.update({'coop_event_vault_share': 1, 'coop_event_guide_name': '保存されない'}, 1, 'admin', 'invalid')
+        self.assertEqual((await SettingsService.get_all())['coop_event_guide_name'], '仲間の導き')
+        self.assertEqual(len(await AdminService.admin_logs()), 1)
+
     async def test_cooperation_settings_persist_and_invalid_changes_roll_back(self):
         with patch('services.cooperation_service.secrets.randbelow', return_value=9999):
             first = await TreasureService.create(901, 'before', 'beginner', vc_members=2)
