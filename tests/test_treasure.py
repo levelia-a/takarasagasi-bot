@@ -82,6 +82,30 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
     async def create(self):
         return await TreasureService.create(1545489116127559681, "テスト🌟", "beginner")
 
+    async def test_cooperation_extends_game_and_does_not_reroll_on_retry(self):
+        self.values['beginner_max'] = 1
+        with patch('services.cooperation_service.secrets.randbelow', return_value=0):
+            session = await TreasureService.create(91, 'coop', 'beginner', vc_members=6)
+        self.assertEqual((session.max_exploration, session.cooperation.extra), (5, 4))
+        self.assertTrue(session.cooperation.event)
+        pool = session.treasure_pool
+        self.values.update(coop_enabled=0, coop_event_extra=0)
+        self.progress.side_effect = [RuntimeError('save failed'), None, None, None, None, None]
+        with patch('services.cooperation_service.CooperationService.draw') as draw:
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+            await TreasureService.explore(session)
+            self.assertEqual(session.exploration_count, 1)
+            self.assertIsNone(session.result)
+            for _ in range(4):
+                await TreasureService.explore(session)
+            draw.assert_not_called()
+        self.assertEqual((session.result, session.success_count), ('max_success', 5))
+        self.assertIs(session.treasure_pool, pool)
+        self.assertEqual(self.progress.await_args.args[3]['success_count'], 5)
+        next_session = await TreasureService.create(92, 'solo', 'beginner', vc_members=6)
+        self.assertEqual(next_session.max_exploration, 1)
+
     async def test_color_changes_per_step_but_not_save_retry_or_retreat(self):
         session = await self.create()
         self.progress.side_effect = [RuntimeError('save failed'), None, None]

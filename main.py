@@ -21,9 +21,12 @@ logger = logging.getLogger(__name__)
 class TreasureBot(commands.Bot):
     def __init__(self, config):
         """Botの基本設定とエラーハンドラーを初期化する。"""
+        intents = discord.Intents.default()
+        intents.voice_states = True
         super().__init__(
             command_prefix="!",
-            intents=discord.Intents.default(),
+            intents=intents,
+            member_cache_flags=discord.MemberCacheFlags(voice=True, joined=False),
             help_command=None,
             allowed_mentions=discord.AllowedMentions.none(),
         )

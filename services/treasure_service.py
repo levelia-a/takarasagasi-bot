@@ -10,6 +10,7 @@ from consts.maps import MAPS
 from services.map_service import MapService
 from services.exploration_color_service import ExplorationColorService
 from services.balance_service import BalanceService
+from services.cooperation_service import CooperationBonus, CooperationService
 from repositories.active_exploration_repository import ActiveExplorationRepository
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
@@ -56,6 +57,7 @@ class Exploration:
     map_tier: str = 'normal'
     exploration_color: str = 'blue'
     settings: dict = field(default_factory=dict, repr=False)
+    cooperation: CooperationBonus = field(default_factory=CooperationBonus)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     @property
@@ -97,11 +99,11 @@ class TreasureService:
             await ActiveExplorationRepository.release(cursor, user_id, session_id)
 
     @staticmethod
-    async def create(user_id, user_name, difficulty):
+    async def create(user_id, user_name, difficulty, *, vc_members=0):
         """運営状態と設定を確認し、開始時の設定を固定した探索を作る。"""
         if difficulty not in DIFFICULTIES:
             raise ValueError("不明な難易度です。")
-        settings = await SettingsService.get_all()
+        settings = dict(await SettingsService.get_all())
         catalog = TreasureCatalogService.load_catalog()
         SettingsService.validate_settings(settings, catalog=catalog)
         catalog = BalanceService.apply_catalog(catalog, settings)
@@ -116,18 +118,21 @@ class TreasureService:
         await TreasureService._claim_user(user_id, session_id)
         try:
             map_tier = MapService.draw(settings)
+            cooperation = CooperationService.draw(vc_members, settings, settings[f'{difficulty}_max'])
+            treasure_pool = CooperationService.apply_pool(treasure_pool, cooperation)
             return Exploration(
                 user_id,
                 user_name,
                 difficulty,
                 settings[f"{difficulty}_price"],
                 min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0)),
-                settings[f"{difficulty}_max"],
+                settings[f"{difficulty}_max"] + cooperation.extra,
                 settings["test_mode"],
                 id=session_id,
                 map_tier=map_tier,
                 unlocked_difficulty=unlock_notice,
                 settings=settings,
+                cooperation=cooperation,
                 treasure_pool=treasure_pool,
             )
         except BaseException:

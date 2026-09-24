@@ -3,6 +3,7 @@ import asyncio
 from consts.treasure import DEFAULT_SETTINGS, DIFFICULTIES, MAX_REWARD, TEST_MODES
 from consts.balance import CATALOG_SETTING_KEYS
 from services.balance_service import BalanceService
+from services.cooperation_service import CooperationService
 from repositories.admin_log_repository import AdminLogRepository
 from repositories.settings_repository import SettingsRepository
 from services.db_service import DbService
@@ -16,6 +17,7 @@ class SettingsService:
     def validate_settings(settings, catalog=None):
         """設定値の範囲を検証し、不正な場合はValueErrorを送出する。"""
         BalanceService.validate(settings)
+        CooperationService.validate(settings)
         if settings["test_mode"] not in TEST_MODES:
             raise ValueError("不明なテストモードです。")
         if settings["operation"] not in (0, 1):
@@ -38,7 +40,9 @@ class SettingsService:
             catalog = TreasureCatalogService.load_catalog()
         catalog = BalanceService.apply_catalog(catalog, settings)
         for key in DIFFICULTIES:
-            TreasureCatalogService.validate_reward_limit(catalog[key], settings[f"{key}_max"])
+            TreasureCatalogService.validate_reward_limit(
+                catalog[key], CooperationService.maximum(settings[f"{key}_max"], settings)
+            )
 
     @staticmethod
     def build_settings(rows):

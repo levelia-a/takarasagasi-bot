@@ -87,6 +87,6 @@ class CatalogTests(unittest.TestCase):
         SettingsService.validate_settings(DEFAULT_SETTINGS | {"beginner_price": MAX_REWARD}, catalog)
         data["beginner"][0]["price"] = MAX_REWARD // 5
         catalog = TreasureCatalogService.validate_catalog(data)
-        SettingsService.validate_settings(DEFAULT_SETTINGS, catalog)
+        SettingsService.validate_settings(DEFAULT_SETTINGS | {'coop_enabled': 0}, catalog)
         with self.assertRaises(TreasureCatalogError):
-            SettingsService.validate_settings(DEFAULT_SETTINGS | {"beginner_max": 6}, catalog)
+            SettingsService.validate_settings(DEFAULT_SETTINGS | {"beginner_max": 6, 'coop_enabled': 0}, catalog)

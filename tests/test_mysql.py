@@ -29,6 +29,25 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cooperation_settings_persist_and_invalid_changes_roll_back(self):
+        with patch('services.cooperation_service.secrets.randbelow', return_value=9999):
+            first = await TreasureService.create(901, 'before', 'beginner', vc_members=2)
+            await SettingsService.update({'coop_1_multiplier': 130, 'coop_1_extra': 2}, 1, 'admin', 'VC協力設定')
+            restored = SettingsService.build_settings(await self._cooperation_setting_rows())
+            self.assertEqual(restored['coop_1_multiplier'], 130)
+            second = await TreasureService.create(902, 'after', 'beginner', vc_members=2)
+        self.assertEqual((first.max_exploration, second.max_exploration), (6, 7))
+        self.assertEqual(first.settings['coop_1_multiplier'], 120)
+        self.assertEqual(second.settings['coop_1_multiplier'], 130)
+        with self.assertRaises(ValueError):
+            await SettingsService.update({'coop_1_people': 7, 'coop_enabled': 0}, 1, 'admin', 'invalid')
+        self.assertEqual((await SettingsService.get_all())['coop_enabled'], 1)
+        self.assertEqual(len(await AdminService.admin_logs()), 1)
+
+    async def _cooperation_setting_rows(self):
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            return await SettingsRepository.get_all_settings(cursor)
+
     async def test_balance_settings_persist_and_only_affect_new_games(self):
         with patch('services.treasure_service.MapService.draw', return_value='gold'):
             first = await TreasureService.create(801, 'old', 'beginner')

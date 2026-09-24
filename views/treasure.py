@@ -6,6 +6,7 @@ from consts.treasure import DIFFICULTIES
 from repositories.active_exploration_repository import TreasureSessionExpired
 from services.progress_service import DifficultyLocked, ProgressService
 from services.treasure_catalog_service import TreasureCatalogError
+from services.cooperation_service import CooperationService
 from services.treasure_service import (
     TreasureAlreadyActive,
     TreasureService,
@@ -132,7 +133,8 @@ class TreasureView(BaseView):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             session = await TreasureService.create(
-                interaction.user.id, str(interaction.user), difficulty
+                interaction.user.id, str(interaction.user), difficulty,
+                vc_members=CooperationService.count_members(interaction.user),
             )
         except (TreasureStopped, TreasureAlreadyActive, TreasureCatalogError) as error:
             await interaction.edit_original_response(content=f"🔴 {error}")

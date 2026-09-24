@@ -5,6 +5,18 @@ from consts.maps import MAPS
 from consts.rarity import RARITIES, EXPLORATION_COLORS
 
 
+def cooperation_text(session):
+    bonus = session.cooperation
+    if not bonus.tier:
+        return '\n\n🤝 VC協力ボーナスなし（開始時判定）'
+    text = (f'\n\n🤝 **VC協力：開始時{bonus.people}人**\n'
+            f'探索＋{bonus.extra}回 / レア以上の重み×{float(bonus.multiplier):g}\n'
+            'この宝探し全体に適用（色補正と掛け合わせ）')
+    if bonus.event:
+        text += '\n🎉 **協力探索イベント発生！**（上記はイベント効果込み）'
+    return text
+
+
 def exploration_embed(session):
     current = MAPS[session.map_tier]
     bonus = EXPLORATION_COLORS[session.exploration_color]
@@ -15,6 +27,7 @@ def exploration_embed(session):
     multiplier = session.settings.get(f'color_{session.exploration_color}_multiplier', bonus['rare_multiplier'] * 100) / 100
     if multiplier > 1:
         description += '\n✨ この探索ではレア以上の宝物が出やすくなります。'
+    description += cooperation_text(session)
     return discord.Embed(title='🗺️ 宝探し', description=description, color=color)
 
 
@@ -28,7 +41,8 @@ def map_start_embed(session):
         description=(f"{session.difficulty_name}宝探し\n\n💰 必要LIA：**{session.price:,} LIA**\n"
                      f"🎯 成功率：**{session.rate}%**\n"
                      f"地図の効果：+{map_bonus}ポイント（上限100%）\n"
-                     "この宝探しの全探索判定に適用されます。"),
+                     "この宝探しの全探索判定に適用されます。"
+                     f"\n🔎 最大探索：{session.max_exploration}回" + cooperation_text(session)),
         color=info['color'],
     )
 
@@ -44,6 +58,8 @@ def treasure_panel(settings):
         "💥 失敗すると発見した宝物はすべて失われます。\n"
         "🏠 引き返せば、宝物の合計価値を確保できます。",
     )
+    if settings.get('coop_enabled', 1):
+        embed.description += '\n🤝 同じVCに仲間がいると探索回数・レア率がアップ！協力イベントのチャンスも。'
     for key, difficulty in DIFFICULTIES.items():
         embed.add_field(
             name=f"{difficulty['emoji']} {difficulty['name']}宝探し",

@@ -7,6 +7,7 @@ from views.common import AdminOnlyModal, AdminOnlyView, send_pages
 from views.messages import log_entries, settings_text, statistics_text
 from views.history import show_history
 from views.balance_admin import BalanceView, balance_text
+from views.cooperation_admin import CooperationView, cooperation_settings_text
 
 
 class SettingsModal(AdminOnlyModal):
@@ -154,6 +155,13 @@ class AdminView(AdminOnlyView):
     def __init__(self):
         """設定変更や履歴確認に使う管理パネルを初期化する。"""
         super().__init__(timeout=300)
+
+    @discord.ui.button(label='VC協力設定', emoji='🤝', style=discord.ButtonStyle.primary, row=4)
+    async def cooperation_button(self, interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.edit_original_response(
+            content=cooperation_settings_text(await SettingsService.get_all()), view=CooperationView()
+        )
 
     @discord.ui.button(label='地図・レア設定', emoji='🎨', style=discord.ButtonStyle.primary, row=4)
     async def balance_button(self, interaction, button):
