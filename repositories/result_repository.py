@@ -1,5 +1,22 @@
 class ResultRepository:
     @staticmethod
+    async def get_statistics_page_before_id(cursor, before_id=None, user_id=None):
+        """次ページ判定用の1件を含め、新しい順に最大11件取得する。"""
+        conditions, params = [], []
+        if before_id is not None:
+            conditions.append("id < %s")
+            params.append(before_id)
+        if user_id is not None:
+            conditions.append("user_id = %s")
+            params.append(user_id)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        await cursor.execute(
+            "SELECT * FROM statistics" + where + " ORDER BY id DESC LIMIT 11",
+            tuple(params),
+        )
+        return await cursor.fetchall()
+
+    @staticmethod
     async def insert_statistics_record_if_session_id_not_exists(cursor, result):
         """未登録のセッションIDのゲーム結果をstatisticsに追加する。"""
         await cursor.execute(

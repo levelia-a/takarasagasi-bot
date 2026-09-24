@@ -24,10 +24,34 @@ CREATE TABLE IF NOT EXISTS statistics (
 -- 難易度解放システム：ユーザーごとの探索回数を永続化する。
 CREATE TABLE IF NOT EXISTS user_progress (
     user_id BIGINT UNSIGNED PRIMARY KEY,
-    beginner_explorations INT NOT NULL DEFAULT 0,
-    intermediate_explorations INT NOT NULL DEFAULT 0,
+    beginner_explorations INT UNSIGNED NOT NULL DEFAULT 0,
+    intermediate_explorations INT UNSIGNED NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 同じ探索の再試行で進捗を二重加算しないための記録。
+CREATE TABLE IF NOT EXISTS user_progress_events (
+    exploration_id VARCHAR(80) PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user_progress_events_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 解放判定そのものではなく、Discordへ同じ解放通知を繰り返さないための状態。
+CREATE TABLE IF NOT EXISTS unlock_notifications (
+    user_id BIGINT UNSIGNED NOT NULL,
+    difficulty VARCHAR(32) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, difficulty)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 同一ユーザーが複数プロセスから同時に宝探しを開始するのを防ぐ。
+CREATE TABLE IF NOT EXISTS active_explorations (
+    user_id BIGINT UNSIGNED PRIMARY KEY,
+    session_id CHAR(36) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    INDEX idx_active_explorations_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS admin_logs (
@@ -36,7 +60,7 @@ CREATE TABLE IF NOT EXISTS admin_logs (
     admin_name VARCHAR(255) NOT NULL,
     action VARCHAR(255) NOT NULL,
     detail TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 """

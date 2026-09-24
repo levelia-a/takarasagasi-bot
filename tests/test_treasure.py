@@ -2,14 +2,23 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from consts.treasure import DEFAULT_SETTINGS
+from consts.treasure import DEFAULT_SETTINGS, MAX_REWARD
+from services.treasure_catalog_service import TreasureCatalogService, TreasureCatalogError
+from tests.treasure_fixtures import install_test_catalog
 from services.db_service import DbService
+from services.progress_service import ProgressService
 from services.settings_service import SettingsService
-from services.treasure_service import TreasureService, TreasureStopped
+from services.treasure_service import (
+    TreasureAlreadyActive,
+    TreasureService,
+    TreasureStopped,
+)
 
 
 class TreasureTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))
+        self.catalog = install_test_catalog(self)
         self.values = DEFAULT_SETTINGS.copy()
         self.settings = AsyncMock()
         self.settings.get_all.side_effect = lambda: self.values.copy()
@@ -26,6 +35,25 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.connection.commit = AsyncMock()
         self.connection.rollback = AsyncMock()
         self.roll = 1
+        self.active = {}
+        active_repo = AsyncMock()
+
+        async def claim(cursor, user_id, session_id):
+            if user_id in self.active:
+                return False
+            self.active[user_id] = session_id
+            return True
+
+        async def release(cursor, user_id, session_id):
+            if self.active.get(user_id) == session_id:
+                self.active.pop(user_id)
+
+        active_repo.claim.side_effect = claim
+        active_repo.release.side_effect = release
+        active_repo.refresh.return_value = None
+        self.enterContext(
+            patch("services.treasure_service.ActiveExplorationRepository", active_repo)
+        )
         self.enterContext(
             patch.object(DbService, "get_connection", self.db.get_connection)
         )
@@ -35,6 +63,14 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.enterContext(
             patch("services.treasure_service.ResultRepository", self.results)
+        )
+        # この単体テストでは進捗保存を分離し、宝探し本体の状態遷移だけを検証する。
+        self.progress = self.enterContext(
+            patch.object(
+                ProgressService,
+                "record_exploration",
+                new=AsyncMock(return_value=None),
+            )
         )
         self.enterContext(
             patch(
@@ -46,11 +82,106 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
     async def create(self):
         return await TreasureService.create(1545489116127559681, "テスト🌟", "beginner")
 
+    async def test_cooperation_extends_game_and_does_not_reroll_on_retry(self):
+        self.values['beginner_max'] = 1
+        with patch('services.cooperation_service.secrets.randbelow', return_value=0):
+            session = await TreasureService.create(91, 'coop', 'beginner', vc_members=6)
+        self.assertEqual((session.max_exploration, session.cooperation.extra), (6, 5))
+        self.assertTrue(session.cooperation.event)
+        pool = session.treasure_pool
+        self.values.update(coop_enabled=0, coop_event_passage_extra=0, coop_event_passage_name='変更後')
+        self.progress.side_effect = [RuntimeError('save failed'), None, None, None, None, None, None]
+        with patch('services.cooperation_service.CooperationService.draw') as draw:
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+            await TreasureService.explore(session)
+            self.assertEqual(session.exploration_count, 1)
+            self.assertIsNone(session.result)
+            for _ in range(5):
+                await TreasureService.explore(session)
+            draw.assert_not_called()
+        self.assertEqual((session.result, session.success_count), ('max_success', 6))
+        self.assertEqual(session.cooperation.event_name, '🗺️ 隠し通路を発見！')
+        self.assertIs(session.treasure_pool, pool)
+        self.assertEqual(self.progress.await_args.args[3]['success_count'], 6)
+        next_session = await TreasureService.create(92, 'solo', 'beginner', vc_members=6)
+        self.assertEqual(next_session.max_exploration, 1)
+
+    async def test_guide_success_bonus_stacks_with_map_and_caps_at_100(self):
+        self.values.update(beginner_rate=80)
+        with patch('services.cooperation_service.secrets.randbelow', side_effect=[0, 7000]), patch(
+            'services.treasure_service.MapService.draw', return_value='silver'
+        ):
+            session = await TreasureService.create(93, 'guide', 'beginner', vc_members=2)
+        self.assertEqual((session.rate, session.cooperation.event_key), (95, 'guide'))
+        self.roll = 95
+        await TreasureService.explore(session)
+        self.assertEqual(session.success_count, 1)
+        self.roll = 96
+        await TreasureService.explore(session)
+        self.assertEqual(session.result, 'failure')
+        with patch('services.cooperation_service.secrets.randbelow', side_effect=[0, 7000]), patch(
+            'services.treasure_service.MapService.draw', return_value='gold'
+        ):
+            capped = await TreasureService.create(94, 'guide', 'beginner', vc_members=2)
+        self.assertEqual(capped.rate, 100)
+
+    async def test_stage_is_drawn_once_at_start_and_survives_steps_retry_and_retreat(self):
+        self.progress.side_effect = [RuntimeError('save failed'), None, None]
+        with patch('services.treasure_service.StageService.draw', side_effect=['sanctuary', 'ruins']) as stages:
+            session = await self.create()
+            self.assertEqual(session.stage, 'sanctuary')
+            self.values['stage_sanctuary_multiplier'] = 100
+            with self.assertRaises(RuntimeError):
+                await TreasureService.explore(session)
+            first_treasure = session.found_treasures[0]
+            self.assertEqual(session.stage, 'sanctuary')
+            await TreasureService.explore(session)
+            self.assertEqual(session.stage, 'sanctuary')
+            self.assertIs(session.found_treasures[0], first_treasure)
+            self.assertEqual(stages.call_count, 1)
+            await TreasureService.explore(session)
+            self.assertEqual(session.stage, 'sanctuary')
+            await TreasureService.retreat(session)
+            stages.assert_called_once()
+            self.assertEqual(session.rate, 60)
+            self.assertEqual(session.settings['stage_sanctuary_multiplier'], 400)
+            other = await TreasureService.create(101, 'other', 'beginner')
+            self.assertEqual(other.stage, 'ruins')
+            self.assertEqual(stages.call_count, 2)
+
+    async def test_failed_exploration_keeps_start_stage(self):
+        with patch('services.treasure_service.StageService.draw', return_value='ruins') as draw:
+            session = await self.create()
+            self.roll = 100
+            await TreasureService.explore(session)
+            self.assertEqual((session.result, session.stage), ('failure', 'ruins'))
+            draw.assert_called_once()
+
+    async def test_map_draw_at_start_applies_to_whole_session_and_caps_rate(self):
+        for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 80)):
+            with patch('services.treasure_service.MapService.draw', return_value=tier) as draw:
+                session = await self.create()
+                self.assertEqual((session.map_tier, session.rate), (tier, expected))
+                await TreasureService.explore(session)
+                await TreasureService.explore(session)
+                await TreasureService.retreat(session)
+                self.assertEqual(session.rate, expected)
+                draw.assert_called_once()
+                await TreasureService.release_user(session.user_id, session.id)
+        self.values['beginner_rate'] = 95
+        with patch('services.treasure_service.MapService.draw', return_value='gold'):
+            session = await self.create()
+        self.assertEqual(session.rate, 100)
+
     async def test_success_and_retreat(self):
         session = await self.create()
         await TreasureService.explore(session)
         await TreasureService.explore(session)
-        self.assertEqual(session.reward, 4000)
+        self.assertEqual(session.reward, 1400)
+        self.assertEqual(len(session.found_treasures), 2)
+        self.assertEqual([t.exploration_number for t in session.found_treasures], [1, 2])
+        self.assertEqual(session.found_treasures[0].key, session.found_treasures[1].key)
         self.results.insert_statistics_record_if_session_id_not_exists.assert_not_awaited()
         await TreasureService.retreat(session)
         self.assertEqual(session.result, "retreat")
@@ -60,9 +191,10 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
             self.results.insert_statistics_record_if_session_id_not_exists.call_args.args
         )
         self.assertIs(cursor, self.cursor)
-        self.assertEqual(record["final_reward"], 4000)
+        self.assertEqual(record["final_reward"], 1400)
         self.assertEqual(record["result"], "retreat")
-        self.connection.begin.assert_not_awaited()
+        self.connection.begin.assert_awaited_once()
+        self.connection.commit.assert_awaited_once()
 
     async def test_failure_loses_all_reward(self):
         session = await self.create()
@@ -74,6 +206,10 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
             (0, "failure", 2),
         )
         self.assertEqual(session.success_count, 1)
+        self.assertEqual(len(session.found_treasures), 1)
+        self.assertEqual(session.found_treasures[0].price, 700)
+        self.assertEqual(self.progress.await_count, 2)
+        self.assertEqual(self.progress.await_args.args[3]["final_reward"], 0)
 
     async def test_rate_boundary(self):
         self.roll = 60
@@ -84,11 +220,58 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         await TreasureService.explore(session)
         self.assertEqual(session.result, "failure")
 
+    async def test_different_treasures_sum_on_completion(self):
+        self.values["beginner_max"] = 3
+        session = await self.create()
+        pool = self.catalog["beginner"]
+        with patch.object(TreasureCatalogService, "draw", side_effect=pool[:3]) as draw:
+            for _ in range(3):
+                await TreasureService.explore(session)
+        self.assertEqual(draw.call_count, 3)
+        self.assertEqual(session.reward, 700 + 800 + 900)
+        self.assertEqual(session.result, "max_success")
+        self.assertEqual(self.progress.await_args.args[3]["final_reward"], 2400)
+
+    async def test_success_save_retry_preserves_treasure_without_drawing(self):
+        for maximum in (1, 5):
+            with self.subTest(maximum=maximum):
+                self.values["beginner_max"] = maximum
+                session = await self.create()
+                self.progress.side_effect = [RuntimeError("save failed"), None]
+                with patch.object(TreasureCatalogService, "draw", return_value=self.catalog["beginner"][1]) as draw:
+                    with self.assertRaises(RuntimeError):
+                        await TreasureService.explore(session)
+                    pending = session.pending_exploration_id
+                    found = tuple(session.found_treasures)
+                    self.roll = 100
+                    await TreasureService.explore(session)
+                    draw.assert_called_once_with(session.treasure_pool, session.stage, session.settings)
+                self.assertEqual(tuple(session.found_treasures), found)
+                self.assertEqual((session.reward, session.exploration_count), (800, 1))
+                self.assertEqual(self.progress.await_args.args[2], pending)
+                self.assertIsNone(session.pending_exploration_id)
+                await TreasureService.release_user(session.user_id, session.id)
+                self.roll = 1
+
+    async def test_unconfigured_difficulty_does_not_claim_user(self):
+        self.catalog["beginner"] = ()
+        with self.assertRaises(TreasureCatalogError):
+            await self.create()
+        self.assertEqual(self.active, {})
+
+    async def test_catalog_changes_only_apply_to_new_sessions(self):
+        session = await self.create()
+        self.catalog["beginner"] = ()
+        await TreasureService.explore(session)
+        self.assertEqual(session.reward, 700)
+        with self.assertRaises(TreasureCatalogError):
+            await TreasureService.create(2, "new", "beginner")
+
     async def test_maximum_one_finishes_on_first_success(self):
         self.values["beginner_max"] = 1
         session = await self.create()
         await TreasureService.explore(session)
-        self.assertEqual((session.reward, session.result), (2000, "max_success"))
+        self.assertEqual((session.reward, session.result), (700, "max_success"))
 
     async def test_settings_are_fixed_for_active_game(self):
         session = await self.create()
@@ -96,7 +279,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
             beginner_rate=0, beginner_price=9000, test_mode="always_fail"
         )
         await TreasureService.explore(session)
-        self.assertEqual(session.reward, 2000)
+        self.assertEqual(session.reward, 700)
         self.assertFalse(session.is_test)
 
     async def test_games_keep_separate_state_and_locks(self):
@@ -106,7 +289,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(first.lock, second.lock)
         await TreasureService.explore(first)
         await TreasureService.retreat(first)
-        self.assertEqual((first.reward, first.result), (2000, "retreat"))
+        self.assertEqual((first.reward, first.result), (700, "retreat"))
         self.assertEqual(
             (second.reward, second.exploration_count, second.result), (0, 0, None)
         )
@@ -122,6 +305,21 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                 await TreasureService.explore(session)
                 self.assertEqual(session.result, result)
                 self.assertTrue(session.is_test)
+                self.assertEqual(len(session.found_treasures), 1 if mode == "always_success" else 0)
+                self.assertEqual(session.reward, 700 if mode == "always_success" else 0)
+                self.progress.assert_not_awaited()
+                await TreasureService.release_user(session.user_id, session.id)
+
+    async def test_same_user_cannot_start_second_active_session(self):
+        session = await self.create()
+        with self.assertRaises(TreasureAlreadyActive):
+            await self.create()
+        await TreasureService.retreat(session)
+        await TreasureService.release_user(session.user_id, session.id)
+        restarted = await self.create()
+        self.assertEqual(restarted.user_id, session.user_id)
+        await TreasureService.retreat(restarted)
+        await TreasureService.release_user(restarted.user_id, restarted.id)
 
     async def test_operation_off_blocks_start(self):
         self.values["operation"] = 0
@@ -131,15 +329,48 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_save_retries_same_result_without_reroll(self):
         session = await self.create()
         self.roll = 100
-        self.results.insert_statistics_record_if_session_id_not_exists.side_effect = [
+        self.progress.side_effect = [
             RuntimeError("connection lost"),
             None,
         ]
+
         with self.assertRaises(RuntimeError):
             await TreasureService.explore(session)
+
+        self.assertEqual((session.result, session.exploration_count), ("failure", 1))
+        exploration_id = session.pending_exploration_id
+        self.assertIsNotNone(exploration_id)
+
+        # 再試行時に乱数を成功側へ変えても、保存済みの失敗結果を再抽選しない。
         self.roll = 1
         await TreasureService.explore(session)
+
         self.assertEqual((session.result, session.exploration_count), ("failure", 1))
+        self.assertIsNone(session.pending_exploration_id)
+        self.assertEqual(self.progress.await_count, 2)
+        first = self.progress.await_args_list[0].args
+        second = self.progress.await_args_list[1].args
+        self.assertEqual(first[2], exploration_id)
+        self.assertEqual(second[2], exploration_id)
+        self.assertEqual(first[3]["result"], "failure")
+        self.assertEqual(second[3]["result"], "failure")
+
+    async def test_retreat_retries_pending_progress_with_final_result(self):
+        session = await self.create()
+        self.progress.side_effect = [RuntimeError("db unavailable"), None]
+
+        with self.assertRaises(RuntimeError):
+            await TreasureService.explore(session)
+
+        exploration_id = session.pending_exploration_id
+        self.assertIsNotNone(exploration_id)
+        await TreasureService.retreat(session)
+
+        self.assertEqual(session.result, "retreat")
+        self.assertIsNone(session.pending_exploration_id)
+        retry = self.progress.await_args_list[1].args
+        self.assertEqual(retry[2], exploration_id)
+        self.assertEqual(retry[3]["result"], "retreat")
 
     async def test_concurrent_end_operations_do_not_change_result(self):
         self.values["beginner_max"] = 1
@@ -149,7 +380,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             (session.result, session.exploration_count, session.reward),
-            ("max_success", 1, 2000),
+            ("max_success", 1, 700),
         )
 
     async def test_invalid_settings_do_not_write(self):
@@ -165,7 +396,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
             {"beginner_price": -1},
             {"beginner_max": 0},
             {"beginner_max": 216},
-            {"beginner_max": 215},
+            {"beginner_price": MAX_REWARD + 1},
             {"test_mode": "invalid"},
         ):
             with self.subTest(values=values), self.assertRaises(ValueError):

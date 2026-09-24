@@ -1,17 +1,22 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from commands.treasure import TreasureCommands
 from consts.treasure import DEFAULT_SETTINGS
+from repositories.active_exploration_repository import TreasureSessionExpired
 from repositories.result_repository import ResultRepository
 from services.db_service import DbService
 from services.progress_service import ProgressService
 from services.settings_service import SettingsService
-from services.treasure_service import TreasureService
+from services.treasure_service import Exploration, FoundTreasure, TreasureService
 from views.admin import AdminView, SettingsModal, TestModeView
 from views.common import send_pages
+from views.messages import exploration_text, treasure_pages
 from views.treasure import ExplorationView, TreasureView
+from views.treasure_inventory import TreasureResultView, TreasureListView, show_treasure_list
+from tests.treasure_fixtures import install_test_catalog
 
 
 def interaction(admin=False):
@@ -24,13 +29,18 @@ def interaction(admin=False):
             send_message=AsyncMock(),
             defer=AsyncMock(),
             is_done=Mock(return_value=False),
+            edit_message=AsyncMock(),
         ),
         edit_original_response=AsyncMock(),
+        original_response=AsyncMock(),
         followup=SimpleNamespace(send=AsyncMock()),
     )
 
 
 class ViewTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_test_catalog(self)
+
     async def test_persistent_panel_and_commands(self):
         view = TreasureView()
         self.assertTrue(view.is_persistent())
@@ -58,6 +68,53 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         view = ExplorationView(SimpleNamespace(user_id=2))
         self.assertFalse(await view.interaction_check(interaction()))
 
+    async def test_inventory_pagination_limits_and_owner(self):
+        found = [FoundTreasure(str(i), "💎" * 100, 10**64, i + 1) for i in range(215)]
+        pages = treasure_pages(found, lost=True)
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(len(page.encode("utf-16-le")) // 2 <= 2000 for page in pages))
+        self.assertEqual(sum(page.count("LIA") for page in pages), 215)
+        self.assertTrue(all("失った宝物一覧" in page for page in pages))
+        event = interaction()
+        await show_treasure_list(event, 1, found, True)
+        view = event.response.send_message.call_args.kwargs["view"]
+        self.assertIsInstance(view, TreasureListView)
+        self.assertTrue(view.previous.disabled)
+        await view.turn_page(event, 1)
+        self.assertEqual(event.response.edit_message.call_args.kwargs["content"], pages[1])
+        self.assertTrue(await view.interaction_check(event))
+        event.user.id = 2
+        self.assertFalse(await view.interaction_check(event))
+        await view.on_timeout()
+        view.message.edit.assert_awaited_once_with(view=None)
+
+    async def test_result_inventory_is_read_only_snapshot(self):
+        session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        session.found_treasures.append(FoundTreasure("a", "**宝物** @everyone", 700, 1))
+        session.result = "failure"
+        view = TreasureResultView(session)
+        session.found_treasures.clear()
+        self.assertEqual([button.label for button in view.children], ["宝物一覧"])
+        event = interaction()
+        await view.inventory.callback(event)
+        content = event.response.send_message.call_args.args[0]
+        self.assertIn("失った宝物一覧", content)
+        self.assertIn("700 LIA", content)
+        self.assertNotIn("@everyone", content)
+        self.assertTrue(event.response.send_message.call_args.kwargs["ephemeral"])
+
+    async def test_discovery_and_final_text_show_treasure_values(self):
+        session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        session.found_treasures.append(FoundTreasure("a", "蒼玉", 1500, 1))
+        session.reward = 1500
+        session.exploration_count = 1
+        text = exploration_text(session)
+        self.assertIn("蒼玉", text)
+        self.assertIn("1,500 LIA", text)
+        self.assertNotIn("2倍", text)
+        session.result = "retreat"
+        self.assertIn("最終報酬（宝物合計）", exploration_text(session))
+
     async def test_rapid_button_click_is_rejected(self):
         view = ExplorationView(SimpleNamespace(user_id=1))
         view.busy = True
@@ -78,7 +135,12 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         db = MagicMock()
-        db.get_connection.return_value.__aenter__.return_value = MagicMock()
+        connection = db.get_connection.return_value.__aenter__.return_value = (
+            MagicMock()
+        )
+        connection.begin = AsyncMock()
+        connection.commit = AsyncMock()
+        connection.rollback = AsyncMock()
         self.enterContext(patch.object(DbService, "get_connection", db.get_connection))
         self.enterContext(
             patch.object(
@@ -101,7 +163,20 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         with patch("views.treasure.asyncio.sleep", new=AsyncMock()):
             await view.act(event, True)
         self.assertEqual(session.result, "max_success")
-        self.assertIsNone(event.edit_original_response.call_args.kwargs["view"])
+        self.assertIsInstance(event.edit_original_response.call_args.kwargs["view"], TreasureResultView)
+
+    async def test_failed_exploration_includes_unlock_notification(self):
+        session = SimpleNamespace(
+            result="failure",
+            difficulty_name="初級",
+            unlocked_difficulty="intermediate",
+            exploration_count=1, max_exploration=5, found_treasures=[],
+        )
+        text = exploration_text(session)
+        self.assertIn("探索失敗", text)
+        self.assertIn("難易度解放", text)
+        self.assertIn("中級宝探し", text)
+        self.assertEqual(session.unlocked_difficulty, "intermediate")
 
     async def test_long_history_is_split_without_second_defer(self):
         event = interaction()
@@ -112,3 +187,184 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         pages = [call.args[0] for call in event.followup.send.call_args_list]
         self.assertEqual("".join(pages), text)
         self.assertTrue(all(len(page) <= 1900 for page in pages))
+
+
+class InitialExplorationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        catalog = install_test_catalog(self)
+        self.session = Exploration(1, "test", "beginner", 1000, 60, 5, "normal")
+        self.session.treasure_pool = catalog["beginner"]
+        self.enterContext(
+            patch.object(
+                TreasureService, "create", new=AsyncMock(return_value=self.session)
+            )
+        )
+        self.refresh = self.enterContext(
+            patch.object(TreasureService, "_refresh_user", new_callable=AsyncMock)
+        )
+        self.release = self.enterContext(
+            patch.object(TreasureService, "release_user", new_callable=AsyncMock)
+        )
+        self.progress = self.enterContext(
+            patch.object(
+                ProgressService, "record_exploration", new=AsyncMock(return_value=None)
+            )
+        )
+        self.save = self.enterContext(
+            patch.object(TreasureService, "save_result", new_callable=AsyncMock)
+        )
+        self.notice = self.enterContext(
+            patch.object(
+                ProgressService, "mark_unlock_notification", new_callable=AsyncMock
+            )
+        )
+        self.roll = self.enterContext(
+            patch("services.treasure_service.random.randint", return_value=1)
+        )
+        self.sleep = self.enterContext(
+            patch("views.treasure.asyncio.sleep", new_callable=AsyncMock)
+        )
+        self.event = interaction()
+        self.message = SimpleNamespace(edit=AsyncMock())
+        self.view = None
+
+        async def edit(**kwargs):
+            if isinstance(kwargs.get("view"), ExplorationView):
+                self.view = kwargs["view"]
+            return self.message
+
+        self.event.edit_original_response.side_effect = edit
+
+    async def test_initial_animation_rejects_both_buttons(self):
+        entered, resume = asyncio.Event(), asyncio.Event()
+
+        async def sleep(delay):
+            if delay == 1.5:
+                entered.set()
+                await resume.wait()
+
+        self.sleep.side_effect = sleep
+        task = asyncio.create_task(TreasureView().start(self.event, "beginner"))
+        await asyncio.wait_for(entered.wait(), 2)
+        try:
+            for deeper in (False, True):
+                event = interaction()
+                await self.view.act(event, deeper)
+                event.response.send_message.assert_awaited_once()
+            self.assertEqual(self.session.exploration_count, 0)
+            self.assertIsNone(self.session.result)
+        finally:
+            resume.set()
+            await task
+        self.assertEqual(self.session.exploration_count, 1)
+        self.progress.assert_awaited_once()
+        self.assertFalse(self.view.busy)
+
+    async def test_initial_db_failure_keeps_pending_id_for_retreat(self):
+        self.progress.side_effect = [RuntimeError("db failed"), None]
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        pending = self.session.pending_exploration_id
+        self.assertIsNotNone(pending)
+        self.assertFalse(self.view.busy)
+        self.assertFalse(self.view.is_finished())
+        self.release.assert_not_awaited()
+        await self.view.act(interaction(), False)
+        self.assertEqual(self.session.exploration_count, 1)
+        self.assertEqual(self.session.result, "retreat")
+        self.assertIsNone(self.session.pending_exploration_id)
+        self.assertEqual(self.progress.await_args_list[1].args[2], pending)
+        self.assertEqual(self.progress.await_args_list[1].args[3]["success_count"], 1)
+        self.roll.assert_called_once()
+        self.release.assert_awaited_once()
+
+    async def test_error_before_first_roll_cannot_retreat_with_zero_explorations(self):
+        self.refresh.side_effect = [RuntimeError("db failed"), None]
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        await self.view.act(interaction(), False)
+        self.assertEqual(self.session.exploration_count, 1)
+        self.assertIsNone(self.session.result)
+        self.progress.assert_awaited_once()
+
+    async def test_initial_final_display_failure_keeps_view_for_retry(self):
+        self.session.max_exploration = 1
+        original_edit = self.event.edit_original_response.side_effect
+
+        async def edit(**kwargs):
+            if isinstance(kwargs.get("view"), TreasureResultView):
+                raise RuntimeError("Discord unavailable")
+            return await original_edit(**kwargs)
+
+        self.event.edit_original_response.side_effect = edit
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        self.assertFalse(self.view.is_finished())
+        self.assertFalse(self.view.busy)
+        self.release.assert_not_awaited()
+        retry = interaction()
+        await self.view.act(retry, True)
+        self.assertTrue(self.view.is_finished())
+        self.assertIsInstance(retry.edit_original_response.call_args.kwargs["view"], TreasureResultView)
+        self.assertEqual(self.session.exploration_count, 1)
+        self.progress.assert_awaited_once()
+        self.release.assert_awaited_once()
+
+    async def test_button_final_display_failure_does_not_stop_retry_view(self):
+        await TreasureView().start(self.event, "beginner")
+        retry = interaction()
+        retry.edit_original_response.side_effect = RuntimeError("Discord unavailable")
+        with self.assertRaises(RuntimeError):
+            await self.view.act(retry, False)
+        self.assertFalse(self.view.is_finished())
+        self.release.assert_not_awaited()
+        await self.view.act(interaction(), False)
+        self.assertTrue(self.view.is_finished())
+        self.assertEqual(self.session.exploration_count, 1)
+
+    async def test_display_failure_does_not_ack_unlock(self):
+        self.progress.return_value = "intermediate"
+        original_edit = self.event.edit_original_response.side_effect
+
+        async def edit(**kwargs):
+            if self.session.exploration_count:
+                raise RuntimeError("Discord unavailable")
+            return await original_edit(**kwargs)
+
+        self.event.edit_original_response.side_effect = edit
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        self.notice.assert_not_awaited()
+        await self.view.act(interaction(), False)
+        self.notice.assert_awaited_once_with(1, "intermediate")
+
+    async def test_notice_save_failure_still_releases_finished_session(self):
+        self.session.max_exploration = 1
+        self.progress.return_value = "intermediate"
+        self.notice.side_effect = RuntimeError("notice save failed")
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        self.release.assert_awaited_once_with(1, self.session.id)
+        self.assertTrue(self.view.is_finished())
+
+    async def test_display_failure_before_attaching_view_releases_claim(self):
+        self.event.edit_original_response.side_effect = RuntimeError(
+            "Discord unavailable"
+        )
+        with self.assertRaises(RuntimeError):
+            await TreasureView().start(self.event, "beginner")
+        self.release.assert_awaited_once_with(1, self.session.id)
+        self.progress.assert_not_awaited()
+
+    async def test_expired_session_removes_buttons_without_writing(self):
+        await TreasureView().start(self.event, "beginner")
+        self.refresh.side_effect = TreasureSessionExpired()
+        event = interaction()
+        await self.view.act(event, False)
+        self.assertTrue(self.view.is_finished())
+        self.assertIsNone(event.edit_original_response.call_args.kwargs["view"])
+        self.assertIn(
+            "操作期限", event.edit_original_response.call_args.kwargs["content"]
+        )
+        self.save.assert_not_awaited()
+        self.progress.assert_awaited_once()
