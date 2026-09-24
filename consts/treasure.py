@@ -1,4 +1,9 @@
+from consts.balance import BALANCE_DEFAULTS
+from consts.cooperation import COOP_DEFAULTS
+
 DEFAULT_SETTINGS = {
+    **BALANCE_DEFAULTS,
+    **COOP_DEFAULTS,
     "beginner_price": 1000,
     "beginner_rate": 60,
     "beginner_max": 5,
@@ -8,6 +13,9 @@ DEFAULT_SETTINGS = {
     "advanced_price": 10000,
     "advanced_rate": 40,
     "advanced_max": 10,
+    # 難易度解放システム：初級10回で中級、中級20回で上級を解放する初期値。
+    "intermediate_unlock": 10,
+    "advanced_unlock": 20,
     "operation": 1,
     "test_mode": "normal",
 }

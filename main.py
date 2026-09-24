@@ -7,8 +7,10 @@ import discord
 from discord.ext import commands
 
 from commands.treasure import TreasureCommands
+from commands.ranking import RankingCommands
 from config import Config
 from services.db_service import DbService
+from services.schema_service import SchemaService
 from services.settings_service import SettingsService
 from views.common import report_error
 from views.treasure import TreasureView
@@ -19,9 +21,12 @@ logger = logging.getLogger(__name__)
 class TreasureBot(commands.Bot):
     def __init__(self, config):
         """Botの基本設定とエラーハンドラーを初期化する。"""
+        intents = discord.Intents.default()
+        intents.voice_states = True
         super().__init__(
             command_prefix="!",
-            intents=discord.Intents.default(),
+            intents=intents,
+            member_cache_flags=discord.MemberCacheFlags(voice=True, joined=False),
             help_command=None,
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -31,8 +36,10 @@ class TreasureBot(commands.Bot):
     async def setup_hook(self):
         """DB接続を開始し、コマンドと常設パネルを登録する。"""
         await DbService.connect(self.config.database)
+        await SchemaService.validate_required_tables()
         SettingsService.validate_settings(await SettingsService.get_all())
         await self.add_cog(TreasureCommands())
+        await self.add_cog(RankingCommands(self, self.config.ranking_interval_seconds))
         self.add_view(TreasureView())
         guild = discord.Object(id=self.config.guild_id)
         self.tree.copy_global_to(guild=guild)
@@ -50,6 +57,7 @@ class TreasureBot(commands.Bot):
     async def close(self):
         """BotとDB接続プールを終了する。"""
         try:
+            await self.remove_cog("RankingCommands")
             await super().close()
         finally:
             await DbService.close()
