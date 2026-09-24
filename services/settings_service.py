@@ -3,6 +3,7 @@ import asyncio
 from consts.treasure import DEFAULT_SETTINGS, DIFFICULTIES, MAX_REWARD, TEST_MODES
 from consts.balance import CATALOG_SETTING_KEYS
 from consts.cooperation import EVENT_TEXT_KEYS
+from consts.stages import LEGACY_STAGE_KEYS
 from services.balance_service import BalanceService
 from services.cooperation_service import CooperationService
 from repositories.admin_log_repository import AdminLogRepository
@@ -49,8 +50,11 @@ class SettingsService:
     def build_settings(rows):
         """設定行の型を変換し、未登録項目を初期値で補完する。"""
         settings = DEFAULT_SETTINGS.copy()
-        for row in rows:
-            key, value = row["key"], row["value"]
+        values = {row['key']: row['value'] for row in rows}
+        for old, new in LEGACY_STAGE_KEYS.items():
+            if new not in values and old in values:
+                values[new] = values[old]
+        for key, value in values.items():
             if key in settings:
                 settings[key] = value if key == "test_mode" or key in CATALOG_SETTING_KEYS or key in EVENT_TEXT_KEYS else int(value)
         return settings

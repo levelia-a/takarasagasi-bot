@@ -30,9 +30,9 @@ class BalanceService:
                     raise ValueError(f'{key}: 設定値が範囲外です。倍率は1〜100倍、補正は0〜100ポイントです。')
         if sum(s[f'map_{tier}_chance'] for tier in ('copper', 'silver', 'gold')) > 10000:
             raise ValueError('銅・銀・金の出現率合計は100%以下にしてください。残りが通常地図になります。')
-        for group, names in (('color', ('blue', 'green', 'red')), ('rarity', tuple(RARITIES))):
+        for group, names in (('stage', ('forest', 'ruins', 'sanctuary')), ('rarity', tuple(RARITIES))):
             if sum(s[f'{group}_{name}_chance'] for name in names) != 10000:
-                raise ValueError('探索色とレア度配分の出現率は、それぞれ合計100%にしてください。')
+                raise ValueError('ステージとレア度配分の出現率は、それぞれ合計100%にしてください。')
         if s['rarity_profile_enabled'] not in (0, 1):
             raise ValueError('レア度配分の設定が不正です。')
 

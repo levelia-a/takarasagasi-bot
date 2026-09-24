@@ -2,7 +2,8 @@ import discord
 
 from consts.treasure import DIFFICULTIES, RESULT_NAMES, TEST_MODES
 from consts.maps import MAPS
-from consts.rarity import RARITIES, EXPLORATION_COLORS
+from consts.rarity import RARITIES
+from consts.stages import STAGES
 
 
 def cooperation_text(session):
@@ -11,7 +12,7 @@ def cooperation_text(session):
         return '\n\n🤝 VC協力ボーナスなし（開始時判定）'
     text = (f'\n\n🤝 **VC協力：開始時{bonus.people}人**\n'
             f'探索＋{bonus.extra}回 / レア以上の重み×{float(bonus.multiplier):g}\n'
-            'この宝探し全体に適用（色補正と掛け合わせ）')
+            'この宝探し全体に適用（ステージ補正と掛け合わせ）')
     if bonus.event:
         name = discord.utils.escape_mentions(discord.utils.escape_markdown(bonus.event_name))
         text += f'\n🎉 **協力探索イベント発生！ {name}**\n{bonus.event_story}'
@@ -23,14 +24,14 @@ def cooperation_text(session):
 
 def exploration_embed(session):
     current = MAPS[session.map_tier]
-    bonus = EXPLORATION_COLORS[session.exploration_color]
+    bonus = STAGES[session.stage]
     color = bonus['color']
     description = exploration_text(session)
     description += f"\n\n🗺️ 使用地図：{current['name']}\n🎯 今回の成功率：{session.rate}%"
-    description += f"\n🎨 今回の探索色：{bonus['name']}"
-    multiplier = session.settings.get(f'color_{session.exploration_color}_multiplier', bonus['rare_multiplier'] * 100) / 100
+    description += f"\n📍 探索ステージ：{bonus['name']}（開始時に決定）"
+    multiplier = session.settings.get(f'stage_{session.stage}_multiplier', bonus['rare_multiplier'] * 100) / 100
     if multiplier > 1:
-        description += '\n✨ この探索ではレア以上の宝物が出やすくなります。'
+        description += f'\n✨ ステージ効果：レア以上の重み×{multiplier:g}（この宝探し全体に有効）'
     description += cooperation_text(session)
     return discord.Embed(title='🗺️ 宝探し', description=description, color=color)
 
@@ -40,12 +41,16 @@ def map_start_embed(session):
     prefix = {'normal': '', 'copper': '銅の', 'silver': '銀の', 'gold': '金の'}[session.map_tier]
     name = f"{prefix}{session.difficulty_name}の宝の地図"
     map_bonus = session.settings.get(f'map_{session.map_tier}_bonus', info['bonus'])
+    stage = STAGES[session.stage]
+    multiplier = session.settings.get(f'stage_{session.stage}_multiplier', stage['rare_multiplier'] * 100) / 100
     return discord.Embed(
         title=f"✨ {name}を手に入れた！",
         description=(f"{session.difficulty_name}宝探し\n\n💰 必要LIA：**{session.price:,} LIA**\n"
                      f"🎯 成功率：**{session.rate}%**\n"
                      f"地図の効果：+{map_bonus}ポイント（上限100%）\n"
                      "この宝探しの全探索判定に適用されます。"
+                     f"\n\n📍 探索ステージ：**{stage['name']}**\n"
+                     f"レア以上の重み×{multiplier:g}。終了までこの場所を探索します。"
                      f"\n🔎 最大探索：{session.max_exploration}回" + cooperation_text(session)),
         color=info['color'],
     )
@@ -59,6 +64,7 @@ def treasure_panel(settings):
         description="宝の地図を手に入れて、危険な場所を探索しよう！\n\n"
         "難易度が高いほど、必要なLIAも大きくなります。\n\n"
         "✨ 探索に成功するたびに宝物を1個発見！\n"
+        "📍 開始時にステージが決まり、終了まで同じ場所を探索します。\n"
         "💥 失敗すると発見した宝物はすべて失われます。\n"
         "🏠 引き返せば、宝物の合計価値を確保できます。",
     )

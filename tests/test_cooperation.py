@@ -66,7 +66,7 @@ class CooperationTests(unittest.TestCase):
         with patch('services.cooperation_service.secrets.randbelow', return_value=9999):
             self.assertTrue(CooperationService.draw(6, DEFAULT_SETTINGS | {'coop_3_chance': 10000}, 5).event)
 
-    def test_cooperation_and_color_multiply_all_rare_weights_exactly(self):
+    def test_cooperation_and_stage_multiply_all_rare_weights_exactly(self):
         pool = tuple(Treasure(str(i), r, 1, Fraction(25), 'beginner', r)
                      for i, r in enumerate(('normal', 'rare', 'epic', 'legendary')))
         pool += (Treasure('zero', 'zero', 1, Fraction(0), 'beginner', 'legendary'),)
@@ -74,10 +74,10 @@ class CooperationTests(unittest.TestCase):
         self.assertEqual(sum(t.probability for t in boosted), 100)
         self.assertEqual(boosted[1].probability / boosted[0].probability, Fraction(3, 2))
         self.assertEqual(pool[0].probability, 25)
-        # 協力1.5倍×赤4倍：通常200、各レア1200。0%の宝物は0のまま。
+        # 協力1.5倍×神殿4倍：通常200、各レア1200。0%の宝物は0のまま。
         for ticket, expected in ((199, 'normal'), (200, 'rare'), (1400, 'epic'), (2600, 'legendary'), (3799, 'legendary')):
             with patch('services.treasure_catalog_service.random.randrange', return_value=ticket) as roll:
-                self.assertEqual(TreasureCatalogService.draw(boosted, 'red', DEFAULT_SETTINGS).rarity, expected)
+                self.assertEqual(TreasureCatalogService.draw(boosted, 'sanctuary', DEFAULT_SETTINGS).rarity, expected)
                 roll.assert_called_once_with(3800)
         self.assertEqual(boosted[-1].probability, 0)
 

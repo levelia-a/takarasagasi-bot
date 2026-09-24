@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from consts.maps import MAPS
-from consts.rarity import EXPLORATION_COLORS
+from consts.stages import STAGES
 from services.map_service import MapService
 from services.treasure_service import Exploration, TreasureService
 from views.messages import exploration_embed, map_start_embed
@@ -24,12 +24,12 @@ class MapTests(unittest.TestCase):
                 self.assertEqual(embed.color.value, MAPS[tier]['color'])
                 session.exploration_count = 1
                 session.result = 'failure'
-                self.assertEqual(exploration_embed(session).color.value, EXPLORATION_COLORS['blue']['color'])
+                self.assertEqual(exploration_embed(session).color.value, STAGES['forest']['color'])
                 session.exploration_count = 2
                 for result in (None, 'failure', 'retreat', 'max_success'):
                     session.result = result
                     later = exploration_embed(session)
-                    self.assertEqual(later.color.value, EXPLORATION_COLORS['blue']['color'])
+                    self.assertEqual(later.color.value, STAGES['forest']['color'])
                     self.assertIn('今回の成功率：75%', later.description)
                 self.assertEqual(session.map_tier, tier)
                 with patch.object(MapService, 'draw') as draw:

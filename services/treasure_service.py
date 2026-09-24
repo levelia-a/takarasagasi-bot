@@ -8,7 +8,7 @@ from uuid import uuid4
 from consts.treasure import DIFFICULTIES
 from consts.maps import MAPS
 from services.map_service import MapService
-from services.exploration_color_service import ExplorationColorService
+from services.stage_service import StageService
 from services.balance_service import BalanceService
 from services.cooperation_service import CooperationBonus, CooperationService
 from repositories.active_exploration_repository import ActiveExplorationRepository
@@ -55,7 +55,7 @@ class Exploration:
     unlocked_difficulty: str | None = None
     pending_exploration_id: str | None = None
     map_tier: str = 'normal'
-    exploration_color: str = 'blue'
+    stage: str = 'forest'
     settings: dict = field(default_factory=dict, repr=False)
     cooperation: CooperationBonus = field(default_factory=CooperationBonus)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
@@ -118,6 +118,7 @@ class TreasureService:
         await TreasureService._claim_user(user_id, session_id)
         try:
             map_tier = MapService.draw(settings)
+            stage = StageService.draw(settings)
             cooperation = CooperationService.draw(vc_members, settings, settings[f'{difficulty}_max'])
             treasure_pool = CooperationService.apply_pool(treasure_pool, cooperation)
             return Exploration(
@@ -130,6 +131,7 @@ class TreasureService:
                 settings["test_mode"],
                 id=session_id,
                 map_tier=map_tier,
+                stage=stage,
                 unlocked_difficulty=unlock_notice,
                 settings=settings,
                 cooperation=cooperation,
@@ -165,13 +167,11 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
 
-            exploration_color = ExplorationColorService.draw(session.settings)
             success = session.test_mode == "always_success" or (
                 session.test_mode == "normal" and random.randint(1, 100) <= session.rate
             )
             # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
-            treasure = TreasureCatalogService.draw(session.treasure_pool, exploration_color, session.settings) if success else None
-            session.exploration_color = exploration_color
+            treasure = TreasureCatalogService.draw(session.treasure_pool, session.stage, session.settings) if success else None
             session.exploration_count += 1
             if success:
                 session.found_treasures.append(FoundTreasure(

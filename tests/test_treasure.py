@@ -126,23 +126,37 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
             capped = await TreasureService.create(94, 'guide', 'beginner', vc_members=2)
         self.assertEqual(capped.rate, 100)
 
-    async def test_color_changes_per_step_but_not_save_retry_or_retreat(self):
-        session = await self.create()
+    async def test_stage_is_drawn_once_at_start_and_survives_steps_retry_and_retreat(self):
         self.progress.side_effect = [RuntimeError('save failed'), None, None]
-        with patch('services.treasure_service.ExplorationColorService.draw', side_effect=['red', 'green']) as colors:
+        with patch('services.treasure_service.StageService.draw', side_effect=['sanctuary', 'ruins']) as stages:
+            session = await self.create()
+            self.assertEqual(session.stage, 'sanctuary')
+            self.values['stage_sanctuary_multiplier'] = 100
             with self.assertRaises(RuntimeError):
                 await TreasureService.explore(session)
             first_treasure = session.found_treasures[0]
-            self.assertEqual(session.exploration_color, 'red')
+            self.assertEqual(session.stage, 'sanctuary')
             await TreasureService.explore(session)
-            self.assertEqual(session.exploration_color, 'red')
+            self.assertEqual(session.stage, 'sanctuary')
             self.assertIs(session.found_treasures[0], first_treasure)
-            self.assertEqual(colors.call_count, 1)
+            self.assertEqual(stages.call_count, 1)
             await TreasureService.explore(session)
-            self.assertEqual(session.exploration_color, 'green')
+            self.assertEqual(session.stage, 'sanctuary')
             await TreasureService.retreat(session)
-            self.assertEqual(colors.call_count, 2)
+            stages.assert_called_once()
             self.assertEqual(session.rate, 60)
+            self.assertEqual(session.settings['stage_sanctuary_multiplier'], 400)
+            other = await TreasureService.create(101, 'other', 'beginner')
+            self.assertEqual(other.stage, 'ruins')
+            self.assertEqual(stages.call_count, 2)
+
+    async def test_failed_exploration_keeps_start_stage(self):
+        with patch('services.treasure_service.StageService.draw', return_value='ruins') as draw:
+            session = await self.create()
+            self.roll = 100
+            await TreasureService.explore(session)
+            self.assertEqual((session.result, session.stage), ('failure', 'ruins'))
+            draw.assert_called_once()
 
     async def test_map_draw_at_start_applies_to_whole_session_and_caps_rate(self):
         for tier, expected in (('normal', 60), ('copper', 65), ('silver', 70), ('gold', 80)):
@@ -231,7 +245,7 @@ class TreasureTests(unittest.IsolatedAsyncioTestCase):
                     found = tuple(session.found_treasures)
                     self.roll = 100
                     await TreasureService.explore(session)
-                    draw.assert_called_once_with(session.treasure_pool, session.exploration_color, session.settings)
+                    draw.assert_called_once_with(session.treasure_pool, session.stage, session.settings)
                 self.assertEqual(tuple(session.found_treasures), found)
                 self.assertEqual((session.reward, session.exploration_count), (800, 1))
                 self.assertEqual(self.progress.await_args.args[2], pending)

@@ -9,7 +9,8 @@ from math import lcm
 from pathlib import Path
 
 from consts.treasure import DIFFICULTIES, MAX_REWARD
-from consts.rarity import RARITIES, EXPLORATION_COLORS
+from consts.rarity import RARITIES
+from consts.stages import STAGES
 
 CATALOG_PATH = Path(__file__).resolve().parents[1] / "data" / "treasures.json"
 
@@ -106,12 +107,12 @@ class TreasureCatalogService:
             raise TreasureCatalogError("宝物の最大合計価値がMySQLの保存上限（65桁）を超えています。")
 
     @staticmethod
-    def draw(treasures, exploration_color='blue', settings=None):
+    def draw(treasures, stage='forest', settings=None):
         """百分率を整数の重みに変換し、浮動小数点の丸めなしに復元抽出する。"""
         if not treasures:
             raise TreasureCatalogError("宝物設定が未完了です。")
-        multiplier = (Fraction(settings[f'color_{exploration_color}_multiplier'], 100) if settings
-                      else EXPLORATION_COLORS[exploration_color]['rare_multiplier'])
+        multiplier = (Fraction(settings[f'stage_{stage}_multiplier'], 100) if settings
+                      else STAGES[stage]['rare_multiplier'])
         probabilities = [t.probability * (1 if t.rarity == 'normal' else multiplier) for t in treasures]
         scale = lcm(*(p.denominator for p in probabilities))
         weights = [int(p * scale) for p in probabilities]

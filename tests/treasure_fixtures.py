@@ -19,7 +19,7 @@ def catalog_data():
 
 
 def install_test_catalog(test_case):
-    test_case.enterContext(patch('services.exploration_color_service.ExplorationColorService.draw', return_value='blue'))
+    test_case.enterContext(patch('services.stage_service.StageService.draw', return_value='forest'))
     catalog = TreasureCatalogService.validate_catalog(catalog_data())
     test_case.enterContext(patch.object(TreasureCatalogService, "load_catalog", return_value=catalog))
     test_case.enterContext(patch("services.treasure_catalog_service.random.randrange", return_value=0))

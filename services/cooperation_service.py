@@ -97,7 +97,7 @@ class CooperationService:
 
     @staticmethod
     def apply_pool(pool, bonus):
-        # 合計100へ正規化してから既存の色補正へ渡す。0%の宝物は復活させない。
+        # 合計100へ正規化してから既存のステージ補正へ渡す。0%の宝物は復活させない。
         weights = [t.probability * (bonus.multiplier if t.rarity != 'normal' else 1) for t in pool]
         total = sum(weights)
         return tuple(replace(t, probability=w * 100 / total) for t, w in zip(pool, weights))

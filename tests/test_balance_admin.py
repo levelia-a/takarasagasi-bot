@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from consts.treasure import DEFAULT_SETTINGS
 from services.balance_service import BalanceService
-from services.exploration_color_service import ExplorationColorService
+from services.stage_service import StageService
 from services.map_service import MapService
 from services.treasure_catalog_service import Treasure, TreasureCatalogService
 from tests.treasure_fixtures import catalog_data
@@ -18,20 +18,20 @@ class BalanceTests(unittest.IsolatedAsyncioTestCase):
         for invalid in ('NaN', 'Infinity', '-1', '0.001', '101'):
             with self.assertRaises(ValueError):
                 BalanceService.scaled_number(invalid)
-        for changes in ({'map_gold_chance': 10000}, {'color_red_chance': 301},
-                        {'rarity_rare_chance': 1}, {'color_green_multiplier': 99}, {'map_gold_bonus': 101}):
+        for changes in ({'map_gold_chance': 10000}, {'stage_sanctuary_chance': 301},
+                        {'rarity_rare_chance': 1}, {'stage_ruins_multiplier': 99}, {'map_gold_bonus': 101}):
             with self.assertRaises(ValueError):
                 BalanceService.validate(DEFAULT_SETTINGS | changes)
 
     def test_custom_map_color_and_decimal_multiplier_reach_draw(self):
         settings = DEFAULT_SETTINGS | {'map_gold_chance': 10000, 'map_silver_chance': 0, 'map_copper_chance': 0,
-            'color_blue_chance': 0, 'color_green_chance': 10000, 'color_red_chance': 0, 'color_green_multiplier': 250}
+            'stage_forest_chance': 0, 'stage_ruins_chance': 10000, 'stage_sanctuary_chance': 0, 'stage_ruins_multiplier': 250}
         with patch('secrets.randbelow', return_value=9999):
             self.assertEqual(MapService.draw(settings), 'gold')
-            self.assertEqual(ExplorationColorService.draw(settings), 'green')
+            self.assertEqual(StageService.draw(settings), 'ruins')
         pool = (Treasure('a', 'A', 1, Fraction(90), 'beginner'), Treasure('b', 'B', 1, Fraction(10), 'beginner', 'rare'))
         with patch('services.treasure_catalog_service.random.randrange', return_value=114) as roll:
-            self.assertEqual(TreasureCatalogService.draw(pool, 'green', settings).key, 'b')
+            self.assertEqual(TreasureCatalogService.draw(pool, 'ruins', settings).key, 'b')
             roll.assert_called_once_with(115)
 
     def test_profile_and_individual_overrides_do_not_mutate_source(self):

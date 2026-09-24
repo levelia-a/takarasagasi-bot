@@ -29,6 +29,20 @@ from tests.treasure_fixtures import install_test_catalog
     os.getenv("TAKARA_TEST_MYSQL_URL"), "使い捨てMySQLのURLが未指定です"
 )
 class MySQLTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_stage_settings_survive_save_and_reload(self):
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for key, value in (('color_blue_chance', '7000'), ('color_green_chance', '2500'),
+                               ('color_red_chance', '500'), ('color_green_multiplier', '350')):
+                await SettingsRepository.upsert_setting_by_key(cursor, key, value)
+        migrated = await SettingsService.get_all()
+        self.assertEqual(migrated['stage_ruins_multiplier'], 350)
+        self.assertEqual(migrated['stage_forest_chance'], 7000)
+        await SettingsService.update({'stage_ruins_multiplier': 225}, 1, 'admin', 'ステージ補正変更')
+        self.assertEqual((await SettingsService.get_all())['stage_ruins_multiplier'], 225)
+        with self.assertRaises(ValueError):
+            await SettingsService.update({'stage_sanctuary_chance': 501}, 1, 'admin', 'invalid')
+        self.assertEqual((await SettingsService.get_all())['stage_sanctuary_chance'], 500)
+
     async def test_event_names_effects_and_distribution_persist_atomically(self):
         await SettingsService.update({
             'coop_event_guide_name': '仲間の導き', 'coop_event_guide_rate': 7,
@@ -70,24 +84,24 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         with patch('services.treasure_service.MapService.draw', return_value='gold'):
             first = await TreasureService.create(801, 'old', 'beginner')
             await SettingsService.update({
-                'map_gold_bonus': 30, 'color_green_multiplier': 250,
+                'map_gold_bonus': 30, 'stage_ruins_multiplier': 250,
                 'rarity_profile_enabled': 1,
                 'treasure_beginner_probabilities': '15,15,15,15,15,8,7,5,4,1',
             }, 1, 'admin', 'バランス変更')
             restored = await SettingsService.get_all()
-            self.assertEqual(restored['color_green_multiplier'], 250)
+            self.assertEqual(restored['stage_ruins_multiplier'], 250)
             self.assertEqual(restored['treasure_beginner_probabilities'], '15,15,15,15,15,8,7,5,4,1')
             second = await TreasureService.create(802, 'new', 'beginner')
         self.assertEqual(first.rate, 80)
         self.assertEqual(second.rate, 90)
-        self.assertEqual(first.settings['color_green_multiplier'], 200)
-        self.assertEqual(second.settings['color_green_multiplier'], 250)
+        self.assertEqual(first.settings['stage_ruins_multiplier'], 200)
+        self.assertEqual(second.settings['stage_ruins_multiplier'], 250)
         self.assertEqual(sum(t.probability for t in second.treasure_pool if t.rarity == 'normal'), 75)
         self.assertEqual(first.treasure_pool[0].probability, 10)
         self.assertEqual(len(await AdminService.admin_logs()), 1)
         with self.assertRaises(ValueError):
-            await SettingsService.update({'color_red_chance': 301}, 1, 'admin', 'invalid')
-        self.assertEqual((await SettingsService.get_all())['color_red_chance'], 300)
+            await SettingsService.update({'stage_sanctuary_chance': 301}, 1, 'admin', 'invalid')
+        self.assertEqual((await SettingsService.get_all())['stage_sanctuary_chance'], 300)
         self.assertEqual(len(await AdminService.admin_logs()), 1)
 
     async def test_history_user_filter_covers_all_pages_and_test_records(self):

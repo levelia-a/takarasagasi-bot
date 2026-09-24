@@ -163,7 +163,7 @@ class AdminView(AdminOnlyView):
             content=cooperation_settings_text(await SettingsService.get_all()), view=CooperationView()
         )
 
-    @discord.ui.button(label='地図・レア設定', emoji='🎨', style=discord.ButtonStyle.primary, row=4)
+    @discord.ui.button(label='地図・ステージ設定', emoji='🗺️', style=discord.ButtonStyle.primary, row=4)
     async def balance_button(self, interaction, button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await interaction.edit_original_response(content=balance_text(await SettingsService.get_all()), view=BalanceView())

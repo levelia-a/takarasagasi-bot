@@ -1,6 +1,7 @@
 import discord
 
 from consts.rarity import RARITIES
+from consts.stages import STAGES
 from consts.treasure import DIFFICULTIES
 from services.balance_service import BalanceService
 from services.settings_service import SettingsService
@@ -11,14 +12,14 @@ from views.common import AdminOnlyModal, AdminOnlyView
 GROUPS = {
     'map_chance': ('地図の出現率（%）', [(f'map_{t}_chance', n, 100) for t, n in [('copper', '銅'), ('silver', '銀'), ('gold', '金')]]),
     'map_bonus': ('地図の成功率補正（ポイント）', [(f'map_{t}_bonus', n, 1) for t, n in [('copper', '銅'), ('silver', '銀'), ('gold', '金')]]),
-    'color_chance': ('探索色の出現率（%）', [(f'color_{c}_chance', n, 100) for c, n in [('blue', '青'), ('green', '緑'), ('red', '赤')]]),
-    'color_multiplier': ('レア以上の抽選倍率', [(f'color_{c}_multiplier', n, 100) for c, n in [('blue', '青'), ('green', '緑'), ('red', '赤')]]),
+    'stage_chance': ('開始ステージの出現率（%）', [(f'stage_{key}_chance', info['name'], 100) for key, info in STAGES.items()]),
+    'stage_multiplier': ('ステージ別レア以上の抽選倍率', [(f'stage_{key}_multiplier', info['name'], 100) for key, info in STAGES.items()]),
     'rarity_chance': ('レア度の基本配分（%）', [(f'rarity_{r}_chance', n, 100) for r, n in RARITIES.items()]),
 }
 
 
 def balance_text(settings):
-    lines = ['⚙️ **地図・レア設定**', '変更は次の宝探しから適用されます。', '']
+    lines = ['⚙️ **地図・ステージ・レア設定**', '変更は次の宝探しから適用されます。ステージは開始時に抽選し、終了まで固定します。', '']
     for group, (title, fields) in GROUPS.items():
         lines.append(f"**{title}**")
         lines.append(' / '.join(f'{name}：{settings[key] / scale:g}' for key, name, scale in fields))
