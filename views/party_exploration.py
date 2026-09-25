@@ -21,7 +21,13 @@ class PartyDifficultyView(BaseView):
         super().__init__(timeout=300)
         self.owner_id = owner_id
         self.party = party
-        for button in (self.beginner, self.intermediate, self.advanced, self.reform):
+        for button in (
+            self.beginner,
+            self.intermediate,
+            self.advanced,
+            self.reform,
+            self.transfer_leader,
+        ):
             button.disabled = owner_id != party.leader_id
 
     async def interaction_check(self, interaction):
@@ -144,6 +150,15 @@ class PartyDifficultyView(BaseView):
 
         await interaction.response.defer()
         await show_party_screen(interaction)
+
+    @discord.ui.button(
+        label="リーダーを交代", style=discord.ButtonStyle.secondary, row=1
+    )
+    async def transfer_leader(self, interaction, button):
+        from views.party_leader import open_leader_transfer
+
+        await interaction.response.defer()
+        await open_leader_transfer(interaction, self.party.id)
 
 
 def shared_embed(run):

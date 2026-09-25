@@ -464,6 +464,58 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
         await PartyExplorationService.step(guild, new, 1, True, 0)
         self.assertEqual(new.session.exploration_count, 1)
 
+    async def test_leader_transfer_persists_in_recruiting_and_confirmed_parties(self):
+        guild = guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        await PartyService.run(guild, 2, 'join', party.id)
+        changed = (await PartyService.run(guild, 1, 'transfer_leader', party.id, '', target_user_id=2)).own
+        self.assertEqual((changed.leader_id, changed.members, changed.confirmation_id), (2, (1, 2), ''))
+        ready = (await PartyService.run(guild, 2, 'confirm', party.id)).own
+        changed = (await PartyService.run(guild, 2, 'transfer_leader', party.id, ready.confirmation_id, target_user_id=1)).own
+        self.assertEqual(changed.members, (1, 2))
+        self.assertTrue(changed.confirmation_id)
+        self.assertNotEqual(changed.confirmation_id, ready.confirmation_id)
+        restored = (await PartyService.run(guild, 1)).own
+        self.assertEqual(restored, changed)
+        with self.assertRaises(PartyError):
+            await PartyExplorationService.create(guild, 2, party.id, ready.confirmation_id, 'beginner')
+        run = await PartyExplorationService.create(guild, 1, party.id, changed.confirmation_id, 'beginner')
+        self.assertEqual(run.leader_id, 1)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'transfer_leader', party.id, changed.confirmation_id, target_user_id=2)
+        self.assertEqual((await PartyService.run(guild, 1)).own.run_id, run.id)
+
+    async def test_leader_transfer_revalidates_departed_target_and_old_selection(self):
+        guild = guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        await PartyService.run(guild, 2, 'join', party.id)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'transfer_leader', party.id, '', target_user_id=3)
+        ready = (await PartyService.run(guild, 1, 'confirm', party.id)).own
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'transfer_leader', party.id, '', target_user_id=2)
+        guild.voice_channels[0].members = [m for m in guild.voice_channels[0].members if m.id != 2]
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'transfer_leader', party.id, ready.confirmation_id, target_user_id=2)
+        current = (await PartyService.run(guild, 1)).own
+        self.assertEqual((current.leader_id, current.members), (1, (1,)))
+        self.assertFalse(current.confirmation_id)
+
+    async def test_concurrent_leader_transfers_have_one_winner(self):
+        guild = guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        await PartyService.run(guild, 2, 'join', party.id)
+        await PartyService.run(guild, 3, 'join', party.id)
+        results = await asyncio.gather(
+            PartyService.run(guild, 1, 'transfer_leader', party.id, '', target_user_id=2),
+            PartyService.run(guild, 1, 'transfer_leader', party.id, '', target_user_id=3),
+            return_exceptions=True,
+        )
+        self.assertEqual(sum(isinstance(r, PartyError) for r in results), 1)
+        current = (await PartyService.run(guild, 1)).own
+        self.assertIn(current.leader_id, (2, 3))
+        self.assertEqual(current.members, (1, 2, 3))
+
     async def asyncSetUp(self):
         self.enterContext(patch.object(PartyExplorationService, "runs", {}))
         self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))

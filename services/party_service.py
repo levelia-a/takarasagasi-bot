@@ -72,6 +72,7 @@ class PartyService:
         party_id,
         confirmation_id=None,
         expected_members=None,
+        target_user_id=None,
     ):
         own = next((p for p in parties.values() if user_id in p.members), None)
         channel_id = voices.get(user_id)
@@ -100,11 +101,37 @@ class PartyService:
                 )
             if own is None:
                 parties[party_id] = replace(target, members=(*target.members, user_id))
-        elif action in ("leave", "disband", "confirm", "reform"):
+        elif action in ("leave", "disband", "confirm", "reform", "transfer_leader"):
             # 古い画面で新しい所属を削除しないよう、表示したパーティーIDに束縛する。
             if own is None or own.id != party_id:
                 raise PartyError("所属が変わっています。現在の状態に更新しました。")
-            if action in ("confirm", "reform"):
+            if action == "transfer_leader":
+                if own.leader_id != user_id:
+                    raise PartyError("リーダーを交代できるのは現在のリーダーだけです。")
+                if own.run_id:
+                    raise PartyError(
+                        "共有探索中はリーダーを交代できません。探索の終了後に操作してください。"
+                    )
+                if confirmation_id != own.confirmation_id:
+                    raise PartyError(
+                        "確定状態が変わりました。リーダーの交代画面を開き直してください。"
+                    )
+                if target_user_id == user_id:
+                    raise PartyError("交代先には自分以外のメンバーを選んでください。")
+                if (
+                    target_user_id not in own.members
+                    or voices.get(target_user_id) != own.channel_id
+                ):
+                    raise PartyError(
+                        "交代先は同じVCにいるパーティーメンバーから選んでください。"
+                    )
+                parties[own.id] = replace(
+                    own,
+                    leader_id=target_user_id,
+                    # 確定済みの構成は維持し、以前の難易度画面だけを無効化する。
+                    confirmation_id=str(uuid4()) if own.confirmation_id else "",
+                )
+            elif action in ("confirm", "reform"):
                 if own.leader_id != user_id:
                     raise PartyError("確定・組み直しはリーダーだけが操作できます。")
                 if own.run_id:
@@ -198,6 +225,7 @@ class PartyService:
         party_id=None,
         confirmation_id=None,
         expected_members=None,
+        target_user_id=None,
     ):
         """照合・認可・更新を同一トランザクションで行い、最新画面を返す。"""
         error = None
@@ -211,6 +239,7 @@ class PartyService:
                     party_id,
                     confirmation_id,
                     expected_members,
+                    target_user_id,
                 )
             except PartyError as caught:
                 error = caught

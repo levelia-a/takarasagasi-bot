@@ -22,6 +22,7 @@ async def show_party_screen(
     page=0,
     confirmation_id=None,
     expected_members=None,
+    target_user_id=None,
 ):
     notice = None
     try:
@@ -32,7 +33,10 @@ async def show_party_screen(
             party_id,
             confirmation_id,
             expected_members,
+            target_user_id,
         )
+        if action == "transfer_leader":
+            notice = f"<@{target_user_id}> にリーダーを交代しました。新しいリーダーはパーティー画面の「更新」を押すと操作できます。"
     except PartyError as error:
         notice = str(error)
         try:
@@ -99,11 +103,15 @@ class PartyView(BaseView):
             if screen.own.leader_id != owner_id:
                 self.remove_item(self.disband)
                 self.remove_item(self.confirm)
+                self.remove_item(self.transfer_leader)
             elif screen.own.run_id:
                 self.remove_item(self.confirm)
+                self.remove_item(self.transfer_leader)
             else:
                 self.confirm.disabled = len(screen.own.members) < 2
+                self.transfer_leader.disabled = len(screen.own.members) < 2
         else:
+            self.remove_item(self.transfer_leader)
             self.remove_item(self.confirm)
             self.remove_item(self.leave)
             self.remove_item(self.disband)
@@ -201,6 +209,15 @@ class PartyView(BaseView):
     @discord.ui.button(label="確定", style=discord.ButtonStyle.primary, row=0)
     async def confirm(self, interaction, button):
         await self.act(interaction, "confirm", self.screen.own.id)
+
+    @discord.ui.button(
+        label="リーダーを交代", style=discord.ButtonStyle.secondary, row=0
+    )
+    async def transfer_leader(self, interaction, button):
+        from views.party_leader import open_leader_transfer
+
+        await interaction.response.defer()
+        await open_leader_transfer(interaction, self.screen.own.id)
 
     @discord.ui.button(
         label="パーティーを作成", style=discord.ButtonStyle.success, row=1
