@@ -5,6 +5,7 @@ import logging
 from discord.ext import commands, tasks
 
 from services.party_service import PartyService
+from views.party_exploration import refresh_invalid_runs
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class PartyEvents(commands.Cog):
             return
         try:
             await PartyService.run(guild)
+            await refresh_invalid_runs(guild)
         except Exception:
             logger.exception("パーティーのVC照合に失敗: guild=%s", guild.id)
 

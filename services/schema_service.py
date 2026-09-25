@@ -17,8 +17,13 @@ class SchemaService:
         "party_guild_locks",
         "parties",
         "party_members",
+        "party_states",
     }
     REQUIRED_COLUMNS = {
+        "party_states": {
+            "party_id": "char(36)", "confirmation_id": "varchar(36)",
+            "run_id": "varchar(36)", "expires_at": "datetime",
+        },
         "party_guild_locks": {"guild_id": "bigint unsigned"},
         "parties": {
             "id": "char(36)", "guild_id": "bigint unsigned",
@@ -74,6 +79,7 @@ class SchemaService:
         },
     }
     REQUIRED_PRIMARY_KEYS = {
+        "party_states": {"party_id"},
         "party_guild_locks": {"guild_id"},
         "parties": {"id"},
         "party_members": {"guild_id", "user_id"},

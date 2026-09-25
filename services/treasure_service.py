@@ -117,29 +117,38 @@ class TreasureService:
         session_id = str(uuid4())
         await TreasureService._claim_user(user_id, session_id)
         try:
-            map_tier = MapService.draw(settings)
-            stage = StageService.draw(settings)
-            cooperation = CooperationService.draw(vc_members, settings, settings[f'{difficulty}_max'])
-            treasure_pool = CooperationService.apply_pool(treasure_pool, cooperation)
-            return Exploration(
-                user_id,
-                user_name,
-                difficulty,
-                settings[f"{difficulty}_price"],
-                min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0) + cooperation.rate_bonus),
-                settings[f"{difficulty}_max"] + cooperation.extra,
-                settings["test_mode"],
-                id=session_id,
-                map_tier=map_tier,
-                stage=stage,
-                unlocked_difficulty=unlock_notice,
-                settings=settings,
-                cooperation=cooperation,
-                treasure_pool=treasure_pool,
+            return TreasureService.build_session(
+                user_id, user_name, difficulty, settings, treasure_pool,
+                vc_members=vc_members, session_id=session_id, unlock_notice=unlock_notice,
             )
         except BaseException:
             await TreasureService.release_user(user_id, session_id)
             raise
+
+    @staticmethod
+    def build_session(user_id, user_name, difficulty, settings, treasure_pool, *,
+                      vc_members, session_id, unlock_notice=None):
+        """個人・共有探索で同じ開始時抽選を使う。呼び出し側で開始枠を確保する。"""
+        map_tier = MapService.draw(settings)
+        stage = StageService.draw(settings)
+        cooperation = CooperationService.draw(vc_members, settings, settings[f'{difficulty}_max'])
+        treasure_pool = CooperationService.apply_pool(treasure_pool, cooperation)
+        return Exploration(
+            user_id,
+            user_name,
+            difficulty,
+            settings[f"{difficulty}_price"],
+            min(100, settings[f"{difficulty}_rate"] + (settings[f'map_{map_tier}_bonus'] if map_tier != 'normal' else 0) + cooperation.rate_bonus),
+            settings[f"{difficulty}_max"] + cooperation.extra,
+            settings["test_mode"],
+            id=session_id,
+            map_tier=map_tier,
+            stage=stage,
+            unlocked_difficulty=unlock_notice,
+            settings=settings,
+            cooperation=cooperation,
+            treasure_pool=treasure_pool,
+        )
 
     @staticmethod
     async def explore(session):
@@ -167,23 +176,7 @@ class TreasureService:
                 await TreasureService.save_result(session)
                 return session
 
-            success = session.test_mode == "always_success" or (
-                session.test_mode == "normal" and random.randint(1, 100) <= session.rate
-            )
-            # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
-            treasure = TreasureCatalogService.draw(session.treasure_pool, session.stage, session.settings) if success else None
-            session.exploration_count += 1
-            if success:
-                session.found_treasures.append(FoundTreasure(
-                    treasure.key, treasure.name, treasure.price, session.exploration_count, treasure.rarity
-                ))
-                session.success_count += 1
-                session.reward = sum(item.price for item in session.found_treasures)
-                if session.exploration_count >= session.max_exploration:
-                    session.result = "max_success"
-            else:
-                session.reward = 0
-                session.result = "failure"
+            TreasureService.roll(session)
 
             if not session.is_test:
                 session.pending_exploration_id = (
@@ -205,6 +198,27 @@ class TreasureService:
             elif session.result is not None:
                 await TreasureService.save_result(session)
             return session
+
+    @staticmethod
+    def roll(session):
+        """awaitせず1回分の共通判定・宝物・終了状態を確定する。"""
+        success = session.test_mode == "always_success" or (
+            session.test_mode == "normal" and random.randint(1, 100) <= session.rate
+        )
+        # ここからpending ID設定まではawaitせず、判定と宝物を一度だけ確定する。
+        treasure = TreasureCatalogService.draw(session.treasure_pool, session.stage, session.settings) if success else None
+        session.exploration_count += 1
+        if success:
+            session.found_treasures.append(FoundTreasure(
+                treasure.key, treasure.name, treasure.price, session.exploration_count, treasure.rarity
+            ))
+            session.success_count += 1
+            session.reward = sum(item.price for item in session.found_treasures)
+            if session.exploration_count >= session.max_exploration:
+                session.result = "max_success"
+        else:
+            session.reward = 0
+            session.result = "failure"
 
     @staticmethod
     async def retreat(session):

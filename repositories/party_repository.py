@@ -18,7 +18,12 @@ class PartyRepository:
     @staticmethod
     async def get_parties_by_guild_id(cursor, guild_id):
         await cursor.execute(
-            "SELECT id, channel_id, leader_id FROM parties WHERE guild_id = %s ORDER BY created_at, id",
+            """SELECT p.id, p.channel_id, p.leader_id,
+               CASE WHEN s.run_id <> '' AND s.expires_at <= NOW() THEN ''
+                    ELSE COALESCE(s.confirmation_id, '') END AS confirmation_id,
+               CASE WHEN s.expires_at > NOW() THEN COALESCE(s.run_id, '') ELSE '' END AS run_id
+               FROM parties p LEFT JOIN party_states s ON s.party_id = p.id
+               WHERE p.guild_id = %s ORDER BY p.created_at, p.id""",
             (guild_id,),
         )
         parties = await cursor.fetchall()
@@ -40,6 +45,9 @@ class PartyRepository:
                 )
             if party_id not in after:
                 await cursor.execute(
+                    "DELETE FROM party_states WHERE party_id = %s", (party_id,)
+                )
+                await cursor.execute(
                     "DELETE FROM parties WHERE id = %s AND guild_id = %s",
                     (party_id, guild_id),
                 )
@@ -54,6 +62,23 @@ class PartyRepository:
                 await cursor.execute(
                     "UPDATE parties SET leader_id = %s WHERE id = %s AND guild_id = %s",
                     (party.leader_id, party_id, guild_id),
+                )
+            if old is None or (old.confirmation_id, old.run_id) != (
+                party.confirmation_id,
+                party.run_id,
+            ):
+                await cursor.execute(
+                    """INSERT INTO party_states (party_id, confirmation_id, run_id, expires_at)
+                       VALUES (%s, %s, %s, DATE_ADD(NOW(), INTERVAL 5 MINUTE))
+                       ON DUPLICATE KEY UPDATE confirmation_id = %s, run_id = %s,
+                       expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE)""",
+                    (
+                        party_id,
+                        party.confirmation_id,
+                        party.run_id,
+                        party.confirmation_id,
+                        party.run_id,
+                    ),
                 )
             for user_id in party.members:
                 if old is None or user_id not in old.members:

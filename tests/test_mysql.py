@@ -19,6 +19,7 @@ from repositories.result_repository import ResultRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
 from services.party_service import PartyError, PartyService
+from services.party_exploration_service import PartyExplorationService
 from repositories.party_repository import PartyRepository
 from tests.test_party import guild_fixture
 from services.progress_service import ProgressService
@@ -287,7 +288,184 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
                 await cursor.execute('INSERT INTO party_members (guild_id, user_id, party_id) VALUES (%s, %s, %s)', (guild.id, 1, 'another'))
         self.assertEqual((await PartyService.run(guild, 1)).own.id, party_id)
 
+    async def make_shared_run(self, guild=None, difficulty='beginner'):
+        guild = guild or guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        await PartyService.run(guild, 2, 'join', party.id)
+        party = (await PartyService.run(guild, 1, 'confirm', party.id)).own
+        run = await PartyExplorationService.create(guild, 1, party.id, party.confirmation_id, difficulty)
+        return guild, run
+
+    async def test_party_confirmation_reform_and_stale_membership(self):
+        guild = guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'confirm', party.id)
+        await PartyService.run(guild, 2, 'join', party.id)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 2, 'confirm', party.id)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'confirm', party.id, expected_members=(1,))
+        ready = (await PartyService.run(guild, 1, 'confirm', party.id, expected_members=(1, 2))).own
+        self.assertTrue(ready.confirmation_id)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 3, 'join', party.id)
+        self.assertEqual((await PartyService.run(guild, 3)).parties, ())
+        reopened = (await PartyService.run(guild, 1, 'reform', party.id, ready.confirmation_id)).own
+        self.assertFalse(reopened.confirmation_id)
+        self.assertEqual(reopened.members, (1, 2))
+        renewed = (await PartyService.run(guild, 1, 'confirm', party.id)).own
+        self.assertNotEqual(renewed.confirmation_id, ready.confirmation_id)
+        with self.assertRaises(PartyError):
+            await PartyExplorationService.create(guild, 1, party.id, ready.confirmation_id, 'beginner')
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'reform', party.id, ready.confirmation_id)
+        await PartyService.run(guild, 2, 'leave', party.id)
+        self.assertFalse((await PartyService.run(guild, 1)).own.confirmation_id)
+
+    async def test_shared_exploration_draws_once_and_awards_identical_results_to_everyone(self):
+        guild, run = await self.make_shared_run()
+        with patch('services.treasure_service.random.randint', return_value=1) as roll:
+            await PartyExplorationService.step(guild, run, 1, True, 0)
+            self.assertEqual(roll.call_count, 1)
+            self.assertEqual(run.session.exploration_count, 1)
+            await PartyExplorationService.step(guild, run, 1, False, 1)
+            self.assertEqual(roll.call_count, 1)
+        self.assertTrue(run.complete)
+        for uid in (1, 2):
+            self.assertEqual((await ProgressService.get_exploration_counts(uid))['beginner_explorations'], 1)
+        records = await AdminService.history()
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r['user_id'] for r in records}, {1, 2})
+        self.assertEqual({r['final_reward'] for r in records}, {run.session.reward})
+        self.assertEqual({r['result'] for r in records}, {'retreat'})
+        self.assertEqual(len({r['session_id'] for r in records}), 2)
+        self.assertFalse((await PartyService.run(guild, 1)).own.run_id)
+        self.assertFalse((await PartyService.run(guild, 1)).own.confirmation_id)
+        await TreasureService.create(2, 'solo after group', 'beginner')
+
+    async def test_shared_failure_and_test_mode_are_applied_to_every_member(self):
+        await SettingsService.update({'test_mode': 'always_fail'}, 1, 'admin', 'test')
+        guild, run = await self.make_shared_run()
+        await PartyExplorationService.step(guild, run, 1, True, 0)
+        self.assertTrue(run.complete)
+        self.assertEqual(run.session.result, 'failure')
+        records = await AdminService.history()
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r['final_reward'] for r in records}, {0})
+        self.assertEqual({r['is_test'] for r in records}, {1})
+        for uid in (1, 2):
+            self.assertEqual((await ProgressService.get_exploration_counts(uid))['beginner_explorations'], 0)
+
+    async def test_shared_start_checks_every_members_unlock_and_active_claim_atomically(self):
+        guild = guild_fixture()
+        party = (await PartyService.run(guild, 1, 'create')).own
+        await PartyService.run(guild, 2, 'join', party.id)
+        ready = (await PartyService.run(guild, 1, 'confirm', party.id)).own
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await cursor.execute('INSERT INTO user_progress (user_id, beginner_explorations) VALUES (1, 100)')
+        with self.assertRaisesRegex(PartyError, '<@2>'):
+            await PartyExplorationService.create(guild, 1, party.id, ready.confirmation_id, 'intermediate')
+        solo = await TreasureService.create(2, 'occupied', 'beginner')
+        with self.assertRaisesRegex(PartyError, '<@2>'):
+            await PartyExplorationService.create(guild, 1, party.id, ready.confirmation_id, 'beginner')
+        # 二人目で拒否されても、一人目の開始枠は残らない。
+        first = await TreasureService.create(1, 'not blocked', 'beginner')
+        await TreasureService.release_user(first.user_id, first.id)
+        await TreasureService.release_user(solo.user_id, solo.id)
+        run = await PartyExplorationService.create(guild, 1, party.id, ready.confirmation_id, 'beginner')
+        self.assertEqual(len(run.participants), 2)
+        with self.assertRaises(PartyError):
+            await PartyExplorationService.create(guild, 1, party.id, ready.confirmation_id, 'beginner')
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'reform', party.id, ready.confirmation_id)
+
+    async def test_shared_concurrent_clicks_and_nonleader_cannot_advance_twice(self):
+        guild, run = await self.make_shared_run()
+        with self.assertRaises(PartyError):
+            await PartyExplorationService.step(guild, run, 2, True, 0)
+        with patch('services.treasure_service.random.randint', return_value=1) as roll:
+            results = await asyncio.gather(
+                PartyExplorationService.step(guild, run, 1, True, 0),
+                PartyExplorationService.step(guild, run, 1, True, 0), return_exceptions=True,
+            )
+            self.assertEqual(roll.call_count, 1)
+        self.assertEqual(sum(isinstance(r, PartyError) for r in results), 1)
+        self.assertEqual(run.session.exploration_count, 1)
+
+    async def test_shared_partial_progress_failure_rolls_back_everyone_and_retry_keeps_draw(self):
+        guild, run = await self.make_shared_run()
+        original = ProgressRepository.increment_explorations
+        async def fail_second(cursor, uid, *args):
+            result = await original(cursor, uid, *args)
+            if uid == 2:
+                raise RuntimeError('second member failed')
+            return result
+        with patch.object(ProgressRepository, 'increment_explorations', side_effect=fail_second):
+            with self.assertRaises(RuntimeError):
+                await PartyExplorationService.step(guild, run, 1, True, 0)
+        treasure = tuple(run.session.found_treasures)
+        self.assertTrue(run.pending)
+        for uid in (1, 2):
+            self.assertEqual((await ProgressService.get_exploration_counts(uid))['beginner_explorations'], 0)
+        with patch('services.treasure_service.random.randint') as roll:
+            await PartyExplorationService.step(guild, run, 1, True, 0)
+            roll.assert_not_called()
+        self.assertEqual(tuple(run.session.found_treasures), treasure)
+        for uid in (1, 2):
+            self.assertEqual((await ProgressService.get_exploration_counts(uid))['beginner_explorations'], 1)
+
+    async def test_shared_final_commit_response_loss_does_not_duplicate_or_block_members(self):
+        guild, run = await self.make_shared_run()
+        await PartyExplorationService.step(guild, run, 1, True, 0)
+        original = Connection.commit
+        lost = False
+        async def lose_response(connection):
+            nonlocal lost
+            await original(connection)
+            if not lost:
+                lost = True
+                raise RuntimeError('commit succeeded but response lost')
+        with patch.object(Connection, 'commit', new=lose_response):
+            with self.assertRaises(RuntimeError):
+                await PartyExplorationService.step(guild, run, 1, False, 1)
+        self.assertFalse(run.complete)
+        self.assertEqual(len(await AdminService.history()), 2)
+        await PartyExplorationService.step(guild, run, 1, False, 1)
+        self.assertTrue(run.complete)
+        self.assertEqual(len(await AdminService.history()), 2)
+        await TreasureService.create(1, 'released', 'beginner')
+
+    async def test_shared_member_departure_aborts_and_does_not_release_newer_claim(self):
+        guild, run = await self.make_shared_run()
+        await PartyExplorationService.step(guild, run, 1, True, 0)
+        guild.voice_channels[0].members = [m for m in guild.voice_channels[0].members if m.id != 2]
+        changed = await PartyExplorationService.expire_invalid(guild)
+        self.assertEqual(changed, [run])
+        self.assertTrue(run.aborted)
+        self.assertFalse(await AdminService.history())
+        newer = await TreasureService.create(1, 'new solo', 'beginner')
+        await PartyExplorationService.abort(guild, run, 'repeat abort')
+        with self.assertRaises(TreasureAlreadyActive):
+            await TreasureService.create(1, 'must stay blocked', 'beginner')
+        await TreasureService.release_user(1, newer.id)
+        for uid in (1, 2):
+            self.assertEqual((await ProgressService.get_exploration_counts(uid))['beginner_explorations'], 1)
+
+    async def test_shared_expired_run_cannot_clear_reconfirmed_new_run(self):
+        guild, old = await self.make_shared_run()
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await cursor.execute('UPDATE active_explorations SET expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)')
+            await cursor.execute('UPDATE party_states SET expires_at = DATE_SUB(NOW(), INTERVAL 1 SECOND)')
+        party = (await PartyService.run(guild, 1, 'confirm', old.party_id)).own
+        new = await PartyExplorationService.create(guild, 1, party.id, party.confirmation_id, 'beginner')
+        await PartyExplorationService.abort(guild, old, 'old expired')
+        self.assertEqual((await PartyService.run(guild, 1)).own.run_id, new.id)
+        await PartyExplorationService.step(guild, new, 1, True, 0)
+        self.assertEqual(new.session.exploration_count, 1)
+
     async def asyncSetUp(self):
+        self.enterContext(patch.object(PartyExplorationService, "runs", {}))
         self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))
         self.catalog = install_test_catalog(self)
         with patch.dict(os.environ, {"MYSQL_URL": os.environ["TAKARA_TEST_MYSQL_URL"]}):
@@ -324,6 +502,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             connection.cursor() as cursor,
         ):
             for table in (
+                "party_states",
                 "party_members",
                 "parties",
                 "party_guild_locks",

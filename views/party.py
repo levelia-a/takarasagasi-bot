@@ -15,11 +15,23 @@ def member_name(guild, user_id):
     return discord.utils.escape_mentions(discord.utils.escape_markdown(raw[:32]))
 
 
-async def show_party_screen(interaction, action="refresh", party_id=None, page=0):
+async def show_party_screen(
+    interaction,
+    action="refresh",
+    party_id=None,
+    page=0,
+    confirmation_id=None,
+    expected_members=None,
+):
     notice = None
     try:
         screen = await PartyService.run(
-            interaction.guild, interaction.user.id, action, party_id
+            interaction.guild,
+            interaction.user.id,
+            action,
+            party_id,
+            confirmation_id,
+            expected_members,
         )
     except PartyError as error:
         notice = str(error)
@@ -30,10 +42,19 @@ async def show_party_screen(interaction, action="refresh", party_id=None, page=0
                 content=notice, embed=home_embed(), view=HomeView(interaction.user.id)
             )
             return
-    view = PartyView(interaction.user.id, screen, page)
+    from views.party_exploration import PartyDifficultyView, refresh_invalid_runs
+
+    if action != "refresh":
+        await refresh_invalid_runs(interaction.guild)
+    if screen.own and screen.own.confirmation_id and not screen.own.run_id:
+        view = PartyDifficultyView(interaction.user.id, screen.own)
+        embed = await view.embed(interaction.guild)
+    else:
+        view = PartyView(interaction.user.id, screen, page)
+        embed = view.embed(interaction.guild)
     await interaction.edit_original_response(
         content=notice,
-        embed=view.embed(interaction.guild),
+        embed=embed,
         view=view,
         allowed_mentions=discord.AllowedMentions.none(),
     )
@@ -77,7 +98,13 @@ class PartyView(BaseView):
             self.remove_item(self.create)
             if screen.own.leader_id != owner_id:
                 self.remove_item(self.disband)
+                self.remove_item(self.confirm)
+            elif screen.own.run_id:
+                self.remove_item(self.confirm)
+            else:
+                self.confirm.disabled = len(screen.own.members) < 2
         else:
+            self.remove_item(self.confirm)
             self.remove_item(self.leave)
             self.remove_item(self.disband)
             self.create.disabled = screen.channel_id is None
@@ -112,6 +139,18 @@ class PartyView(BaseView):
                 )
             )
             embed.description += "\n\n同じVCの仲間がトップ画面から参加できます。\nVCを退出・移動すると自動で脱退します。"
+            if party.run_id:
+                from services.party_exploration_service import PartyExplorationService
+
+                run = PartyExplorationService.runs.get(party.run_id)
+                embed.description = f"VC：<#{party.channel_id}>\n共有探索中です。\nリーダー：<@{party.leader_id}>"
+                if run and run.message_url:
+                    embed.description += (
+                        f"\n\n[全員共通の探索画面を開く]({run.message_url})"
+                    )
+                else:
+                    embed.description += "\n画面の準備中、またはBotの再起動後です。再起動後は最大5分で再募集できます。"
+                embed.description += "\n\n脱退・解散すると全員の共有探索が終了します。"
         else:
             parties = screen.parties[
                 self.page * PAGE_SIZE : (self.page + 1) * PAGE_SIZE
@@ -126,11 +165,15 @@ class PartyView(BaseView):
                     )
                 )
                 if not any(isinstance(item, PartySelect) for item in self.children):
-                    self.add_item(PartySelect(parties, guild))
+                    available = [
+                        p for p in parties if not p.confirmation_id and not p.run_id
+                    ]
+                    if available:
+                        self.add_item(PartySelect(available, guild))
             else:
                 embed.description += "募集中のパーティーはありません。\n「パーティーを作成」で仲間を募集しましょう。"
         embed.set_footer(
-            text=f"{self.page + 1}/{self.page_count}ページ · 更新で最新の状態を表示 · 共同探索・特典は今後追加予定"
+            text=f"{self.page + 1}/{self.page_count}ページ · リーダーが確定すると難易度選択へ · 更新で最新の状態を表示"
         )
         return embed
 
@@ -143,9 +186,21 @@ class PartyView(BaseView):
         self.busy = True
         try:
             await interaction.response.defer()
-            await show_party_screen(interaction, action, party_id, page)
+            await show_party_screen(
+                interaction,
+                action,
+                party_id,
+                page,
+                expected_members=self.screen.own.members
+                if action == "confirm"
+                else None,
+            )
         finally:
             self.busy = False
+
+    @discord.ui.button(label="確定", style=discord.ButtonStyle.primary, row=0)
+    async def confirm(self, interaction, button):
+        await self.act(interaction, "confirm", self.screen.own.id)
 
     @discord.ui.button(
         label="パーティーを作成", style=discord.ButtonStyle.success, row=1
