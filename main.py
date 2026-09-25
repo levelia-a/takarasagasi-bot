@@ -6,13 +6,15 @@ import logging
 import discord
 from discord.ext import commands
 
-from commands.treasure import TreasureCommands
+from commands.party import PartyEvents
 from commands.ranking import RankingCommands
+from commands.treasure import TreasureCommands
 from config import Config
 from services.db_service import DbService
 from services.schema_service import SchemaService
 from services.settings_service import SettingsService
 from views.common import report_error
+from views.home import HomeView
 from views.treasure import TreasureView
 
 logger = logging.getLogger(__name__)
@@ -39,8 +41,10 @@ class TreasureBot(commands.Bot):
         await SchemaService.validate_required_tables()
         SettingsService.validate_settings(await SettingsService.get_all())
         await self.add_cog(TreasureCommands())
+        await self.add_cog(PartyEvents(self))
         await self.add_cog(RankingCommands(self, self.config.ranking_interval_seconds))
         self.add_view(TreasureView())
+        self.add_view(HomeView())
         guild = discord.Object(id=self.config.guild_id)
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
@@ -57,6 +61,7 @@ class TreasureBot(commands.Bot):
     async def close(self):
         """BotとDB接続プールを終了する。"""
         try:
+            await self.remove_cog("PartyEvents")
             await self.remove_cog("RankingCommands")
             await super().close()
         finally:

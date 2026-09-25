@@ -1,4 +1,5 @@
-TABLES_SQL = """
+-- 新規DB用。正本 database/tables.py の TABLES_SQL と同じ定義。
+
 CREATE TABLE IF NOT EXISTS settings (
     `key` VARCHAR(64) PRIMARY KEY,
     value VARCHAR(255) NOT NULL
@@ -86,4 +87,3 @@ CREATE TABLE IF NOT EXISTS party_members (
     PRIMARY KEY (guild_id, user_id),
     INDEX idx_party_members_party (party_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-"""

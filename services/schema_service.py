@@ -14,8 +14,21 @@ class SchemaService:
         "unlock_notifications",
         "active_explorations",
         "admin_logs",
+        "party_guild_locks",
+        "parties",
+        "party_members",
     }
     REQUIRED_COLUMNS = {
+        "party_guild_locks": {"guild_id": "bigint unsigned"},
+        "parties": {
+            "id": "char(36)", "guild_id": "bigint unsigned",
+            "channel_id": "bigint unsigned", "leader_id": "bigint unsigned",
+            "created_at": "datetime(6)",
+        },
+        "party_members": {
+            "guild_id": "bigint unsigned", "user_id": "bigint unsigned",
+            "party_id": "char(36)", "joined_at": "datetime(6)",
+        },
         "settings": {"key": "varchar(64)", "value": "varchar(255)"},
         "statistics": {
             "id": "bigint unsigned",
@@ -61,6 +74,9 @@ class SchemaService:
         },
     }
     REQUIRED_PRIMARY_KEYS = {
+        "party_guild_locks": {"guild_id"},
+        "parties": {"id"},
+        "party_members": {"guild_id", "user_id"},
         "settings": {"key"},
         "statistics": {"id"},
         "user_progress": {"user_id"},
@@ -74,6 +90,8 @@ class SchemaService:
         "active_explorations": ("session_id",),
     }
     REQUIRED_DEFAULTS = {
+        ("parties", "created_at"): "current_timestamp(6)",
+        ("party_members", "joined_at"): "current_timestamp(6)",
         ("user_progress", "beginner_explorations"): "0",
         ("user_progress", "intermediate_explorations"): "0",
         ("statistics", "is_test"): "0",

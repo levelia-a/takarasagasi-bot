@@ -2,11 +2,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from services.settings_service import SettingsService
 from views.admin import AdminView
 from views.common import require_admin
-from views.messages import treasure_panel
-from views.treasure import TreasureView
+from views.home import HomeView, home_embed
 
 
 class TreasureCommands(commands.Cog):
@@ -15,9 +13,8 @@ class TreasureCommands(commands.Cog):
     async def takara(self, interaction: discord.Interaction):
         """宝探しを開始する公開パネルを表示する。"""
         await interaction.response.defer()
-        settings = await SettingsService.get_all()
         await interaction.edit_original_response(
-            embed=treasure_panel(settings), view=TreasureView()
+            embed=home_embed(), view=HomeView()
         )
 
     @app_commands.command(

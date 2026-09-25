@@ -18,6 +18,9 @@ from repositories.progress_repository import ProgressRepository
 from repositories.result_repository import ResultRepository
 from services.admin_service import AdminService
 from services.db_service import DbService
+from services.party_service import PartyError, PartyService
+from repositories.party_repository import PartyRepository
+from tests.test_party import guild_fixture
 from services.progress_service import ProgressService
 from services.schema_service import SchemaService
 from services.settings_service import SettingsService
@@ -188,6 +191,102 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             if metric != 'successes':
                 self.assertEqual(entries[0].value, 10**60 + 12)
 
+    async def test_party_concurrent_create_is_idempotent_and_reload_preserves_members(self):
+        guild = guild_fixture()
+        results = await asyncio.gather(*(PartyService.run(guild, 1, 'create') for _ in range(5)))
+        self.assertEqual(len({r.own.id for r in results}), 1)
+        party_id = results[0].own.id
+        await asyncio.gather(*(PartyService.run(guild, 2, 'join', party_id) for _ in range(4)))
+        restored = await PartyService.run(guild, 2)
+        self.assertEqual(restored.own.members, (1, 2))
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await cursor.execute('SELECT COUNT(*) AS n FROM party_members')
+            self.assertEqual((await cursor.fetchone())['n'], 2)
+
+    async def test_party_concurrent_joins_have_one_membership_and_other_vc_is_rejected(self):
+        guild = guild_fixture()
+        first = (await PartyService.run(guild, 1, 'create')).own.id
+        second = (await PartyService.run(guild, 2, 'create')).own.id
+        results = await asyncio.gather(
+            PartyService.run(guild, 3, 'join', first),
+            PartyService.run(guild, 3, 'join', second), return_exceptions=True,
+        )
+        self.assertEqual(sum(isinstance(r, PartyError) for r in results), 1)
+        restored = await PartyService.run(guild, 3)
+        self.assertEqual(len(restored.own.members), 2)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 4, 'join', first)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 99, 'create')
+
+    async def test_party_voice_move_transfers_leader_and_offline_restart_removes_empty(self):
+        guild = guild_fixture()
+        party_id = (await PartyService.run(guild, 1, 'create')).own.id
+        await PartyService.run(guild, 2, 'join', party_id)
+        leader = guild.voice_channels[0].members.pop(0)
+        guild.voice_channels[1].members.append(leader)
+        restored = await PartyService.run(guild, 2)
+        self.assertEqual((restored.own.leader_id, restored.own.members), (2, (2,)))
+        # 起動後の照合と同じ入口。停止中に全員退出した場合も削除する。
+        guild.voice_channels[0].members.clear()
+        await PartyService.run(guild)
+        self.assertIsNone((await PartyService.run(guild, 2)).own)
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            await cursor.execute('SELECT COUNT(*) AS n FROM parties')
+            self.assertEqual((await cursor.fetchone())['n'], 0)
+
+    async def test_party_stale_exit_and_nonleader_disband_cannot_mutate_membership(self):
+        guild = guild_fixture()
+        old = (await PartyService.run(guild, 1, 'create')).own.id
+        await PartyService.run(guild, 1, 'leave', old)
+        current = (await PartyService.run(guild, 1, 'create')).own.id
+        await PartyService.run(guild, 2, 'join', current)
+        for uid, action, target in ((1, 'leave', old), (1, 'disband', old), (2, 'disband', current)):
+            with self.subTest(action=action, uid=uid), self.assertRaises(PartyError):
+                await PartyService.run(guild, uid, action, target)
+        self.assertEqual((await PartyService.run(guild, 1)).own.members, (1, 2))
+        await PartyService.run(guild, 1, 'leave', current)
+        self.assertEqual((await PartyService.run(guild, 2)).own.leader_id, 2)
+        await PartyService.run(guild, 2, 'disband', current)
+        self.assertIsNone((await PartyService.run(guild, 2)).own)
+        with self.assertRaises(PartyError):
+            await PartyService.run(guild, 1, 'join', current)
+
+    async def test_party_partial_write_failure_rolls_back_entire_membership(self):
+        guild = guild_fixture()
+        original = PartyRepository.save_party_changes
+        async def fail_after_writes(*args):
+            await original(*args)
+            raise RuntimeError('failed before commit')
+        with patch.object(PartyRepository, 'save_party_changes', side_effect=fail_after_writes):
+            with self.assertRaises(RuntimeError):
+                await PartyService.run(guild, 1, 'create')
+        self.assertEqual((await PartyService.run(guild, 1)).parties, ())
+        self.assertIsNotNone((await PartyService.run(guild, 1, 'create')).own)
+
+    async def test_party_voice_is_checked_after_database_lock_wait(self):
+        guild = guild_fixture()
+        original = PartyRepository.get_guild_lock_for_update
+        async def move_while_waiting(cursor, guild_id):
+            await original(cursor, guild_id)
+            guild.voice_channels[0].members.clear()
+        with patch.object(PartyRepository, 'get_guild_lock_for_update', side_effect=move_while_waiting):
+            with self.assertRaises(PartyError):
+                await PartyService.run(guild, 1, 'create')
+        self.assertEqual((await PartyService.run(guild, 1)).parties, ())
+
+    async def test_party_migration_is_repeatable_and_unique_membership_is_enforced(self):
+        from pathlib import Path
+        guild = guild_fixture()
+        party_id = (await PartyService.run(guild, 1, 'create')).own.id
+        async with DbService.get_connection() as connection, connection.cursor() as cursor:
+            for statement in Path('src/sql/20260925_parties.sql').read_text().split(';'):
+                if statement.strip():
+                    await cursor.execute(statement)
+            with self.assertRaises(IntegrityError):
+                await cursor.execute('INSERT INTO party_members (guild_id, user_id, party_id) VALUES (%s, %s, %s)', (guild.id, 1, 'another'))
+        self.assertEqual((await PartyService.run(guild, 1)).own.id, party_id)
+
     async def asyncSetUp(self):
         self.enterContext(patch('services.treasure_service.MapService.draw', return_value='normal'))
         self.catalog = install_test_catalog(self)
@@ -225,6 +324,9 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             connection.cursor() as cursor,
         ):
             for table in (
+                "party_members",
+                "parties",
+                "party_guild_locks",
                 "admin_logs",
                 "active_explorations",
                 "unlock_notifications",

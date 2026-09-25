@@ -124,9 +124,25 @@ class ExplorationView(BaseView):
 
 
 class TreasureView(BaseView):
-    def __init__(self):
-        """再起動後も使用する宝探しの入口パネルを初期化する。"""
-        super().__init__(timeout=None)
+    def __init__(self, owner_id=None):
+        """本人専用の難易度画面。owner未指定時は旧公開パネルを復元する。"""
+        super().__init__(timeout=300 if owner_id is not None else None)
+        self.owner_id = owner_id
+        if owner_id is None:
+            # 以前設置した公開の難易度パネルも引き続き操作できる。
+            self.remove_item(self.back)
+
+    async def interaction_check(self, interaction):
+        if self.owner_id is not None and interaction.user.id != self.owner_id:
+            await interaction.response.send_message("この画面は開いた本人だけが操作できます。", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="戻る", style=discord.ButtonStyle.secondary, custom_id="takara_difficulty_back", row=1)
+    async def back(self, interaction, button):
+        from views.home import HomeView, home_embed
+
+        await interaction.response.edit_message(content=None, embed=home_embed(), view=HomeView(self.owner_id))
 
     async def start(self, interaction, difficulty):
         """選択した難易度の探索を開始し、最初の結果を本人に表示する。"""
