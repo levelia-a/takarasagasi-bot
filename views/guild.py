@@ -140,6 +140,14 @@ class GuildModal(discord.ui.Modal):
         embed.description = (
             f"ギルド名：**{safe_name(confirmation.target.name)}**\n" + embed.description
         )
+        if self.action == "create":
+            embed.add_field(
+                name="あいことば",
+                value=safe_name(
+                    GuildService.clean_text(self.passphrase.value, "あいことば", 64)
+                ),
+                inline=False,
+            )
         embed.set_footer(text="「確定」で作成・加入します。確認の有効期限は5分です。")
         await interaction.edit_original_response(
             embed=embed, view=GuildConfirmView(confirmation)
