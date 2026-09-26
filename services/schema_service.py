@@ -7,6 +7,7 @@ from services.db_service import DbService
 
 class SchemaService:
     REQUIRED_TABLES = {
+        "game_guild_locks", "game_guilds", "game_guild_members",
         "settings",
         "statistics",
         "user_progress",
@@ -20,6 +21,15 @@ class SchemaService:
         "party_states",
     }
     REQUIRED_COLUMNS = {
+        "game_guild_locks": {"server_id": "bigint unsigned"},
+        "game_guilds": {
+            "id": "char(36)", "server_id": "bigint unsigned", "name": "varchar(32)",
+            "passphrase_hash": "char(64)", "leader_id": "bigint unsigned",
+        },
+        "game_guild_members": {
+            "server_id": "bigint unsigned", "user_id": "bigint unsigned",
+            "game_guild_id": "char(36)", "server_joined_at": "varchar(40)",
+        },
         "party_states": {
             "party_id": "char(36)", "confirmation_id": "varchar(36)",
             "run_id": "varchar(36)", "expires_at": "datetime",
@@ -79,6 +89,9 @@ class SchemaService:
         },
     }
     REQUIRED_PRIMARY_KEYS = {
+        "game_guild_locks": {"server_id"},
+        "game_guilds": {"id"},
+        "game_guild_members": {"server_id", "user_id"},
         "party_states": {"party_id"},
         "party_guild_locks": {"guild_id"},
         "parties": {"id"},
@@ -92,6 +105,7 @@ class SchemaService:
         "admin_logs": {"id"},
     }
     REQUIRED_UNIQUE_KEYS = {
+        "game_guilds": ("server_id", "passphrase_hash"),
         "statistics": ("session_id",),
         "active_explorations": ("session_id",),
     }

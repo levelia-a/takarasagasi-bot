@@ -89,7 +89,7 @@ class PartyViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(view, HomeView)
         self.assertTrue(view.is_persistent())
         self.assertEqual(
-            [b.label for b in view.children], ["1人でプレイ", "パーティーを組む"]
+            [b.label for b in view.children], ["1人でプレイ", "パーティーを組む", "ギルド作成/参加"]
         )
 
     async def test_solo_opens_private_difficulty_and_back_keeps_home_private(self):

@@ -54,7 +54,7 @@ cp .env.example .env
 
 宝探しBot専用のMySQLデータベースを用意し、RailwayのMySQLターミナルで
 `database/tables.py` の `TABLES_SQL` 内のSQLを手動実行してください。
-作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`unlock_notifications`・`active_explorations`・`admin_logs` の7つに加え、`party_guild_locks`・`parties`・`party_members`・`party_states` の計11テーブルです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` はDB確定結果が不明な再試行でも二重加算しないため、探索単位のIDを冪等性キーとして保持します。正常完了直後には削除しません。`unlock_notifications` は解放判定には使わず、Discordへの解放通知が実際に表示された後で通知済みとして記録します。`active_explorations` はユーザーIDを主キーにした5分期限の開始枠で、複数Botプロセスが一時的に重なっても同じユーザーの同時進行を防ぎます。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
+作成するテーブルは `settings`・`statistics`・`user_progress`・`user_progress_events`・`unlock_notifications`・`active_explorations`・`admin_logs` の7つに加え、`party_guild_locks`・`parties`・`party_members`・`party_states` の計14テーブルです。`user_progress` はユーザーごとの初級・中級の探索回数を保存します。`user_progress_events` はDB確定結果が不明な再試行でも二重加算しないため、探索単位のIDを冪等性キーとして保持します。正常完了直後には削除しません。`unlock_notifications` は解放判定には使わず、Discordへの解放通知が実際に表示された後で通知済みとして記録します。`active_explorations` はユーザーIDを主キーにした5分期限の開始枠で、複数Botプロセスが一時的に重なっても同じユーザーの同時進行を防ぎます。難易度の解放状態そのものは保存せず、現在の探索回数と現在の解放条件を比較して判定します。
 その後、`.env` に接続情報を設定してください。
 他BotのDBには接続しないでください。`settings` など汎用名のテーブルを使用します。
 
@@ -341,7 +341,7 @@ Bot側に `DISCORD_TOKEN`、`GUILD_ID`、`MYSQLHOST`・`MYSQLPORT`・`MYSQLUSER`
 `GUILD_ID` は省略可能です。MySQL接続には個別設定の代わりに `MYSQL_URL` も使用できます（指定時は優先）。
 `railway.json` の起動コマンドは `python -X pycache_prefix=.cache/pycache main.py` です。HTTPポートは不要です。
 ビルドは `requirements.txt`、Pythonの指定は `.python-version` を使用します。
-デプロイ前に必ず `database/tables.py` のSQLを先に実行し、11テーブルが正しい定義で存在することを確認してからBotコードを更新してください。スキーマ未更新なら起動時検査でBotが停止し、不足テーブル名をログの例外で確認できます。
+デプロイ前に必ず `database/tables.py` のSQLを先に実行し、14テーブルが正しい定義で存在することを確認してからBotコードを更新してください。スキーマ未更新なら起動時検査でBotが停止し、不足テーブル名をログの例外で確認できます。
 コマンド同期は起動時に行うため、別途コマンド登録用のデプロイ処理は不要です。
 
 起動しない場合はRailwayのBuild Logsで依存関係の導入、Deploy Logsで必須変数・MySQL接続・テーブル権限・Discord認証・コマンド同期を確認してください。
@@ -352,3 +352,29 @@ Bot側に `DISCORD_TOKEN`、`GUILD_ID`、`MYSQLHOST`・`MYSQLPORT`・`MYSQLUSER`
 ## CI
 
 Pull RequestではGitHub ActionsがPython 3.12とMySQL 8を起動し、通常の単体テストとMySQL結合テストをまとめて実行します。ローカルでMySQL URLを用意できない場合でも、PR上ではDB関連テストをskipせず確認します。
+
+
+## ギルド（1週間イベント用）
+
+トップの「ギルド作成/参加」から、本人専用の画面を開きます。パーティー・VCとは独立した所属で、
+Discordサーバーごとに1人1ギルド、リーダーを含め最大6人です。所属中はメンバー一覧を表示します。
+別ギルドの人とも従来どおりパーティーを組めます。競争指標・ランキング・報酬は未実装です。
+イベントの開始日・終了日は未指定のため、自動終了・所属リセットは設けていません。
+
+作成時はギルド名（1〜32文字）とあいことば（1〜64文字）を入力します。
+参加時はあいことばを入力し、ギルド名・リーダー・人数・脱退条件を確認して「確定」で加入します。
+作成にも確認を設けています。確認は本人専用・5分間有効で、キャンセルできます。
+確定時にも最新の所属・空き枠・リーダーを検査し、DB行ロックで二重所属・定員超過を防ぎます。
+あいことばは前後の空白を除去しUnicode NFCで正規化、大文字と小文字は区別します。
+同じサーバー内で重複は禁止し、DBにはSHA-256ハッシュだけを保存します。画面・ログにあいことばは掲載しません。
+ギルド名の重複は禁止していません。あいことばの変更・再表示・自主脱退・追放は設けていません。
+
+サーバー脱退時はギルドからも脱退し、リーダーなら残ったメンバーからランダムに後任を選びます。
+0人なら自動解散し、そのあいことばも再利用可能になります。サーバー再参加後は自由に作成・参加できます。
+現在のサーバー所属とDiscord参加日時をRESTで起動後・60秒ごと・関連操作時に照合します。
+通常は約1分で脱退を反映します（API制限・障害時は遅延）。取得失敗やキャッシュ欠落だけでは所属を削除しません。
+参加日時も保存するため、Bot停止中に脱退して再参加した場合も旧所属を解除します。
+追加の特権Intent設定は不要です。
+
+既存DBには起動前に `src/sql/20260926_game_guilds.sql` を適用してください。
+新規DB用の `database/tables.py` / `src/sql/createTable.sql` にも同一定義を含めています。

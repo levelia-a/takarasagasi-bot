@@ -554,6 +554,7 @@ class MySQLTests(unittest.IsolatedAsyncioTestCase):
             connection.cursor() as cursor,
         ):
             for table in (
+                "game_guild_members", "game_guilds", "game_guild_locks",
                 "party_states",
                 "party_members",
                 "parties",

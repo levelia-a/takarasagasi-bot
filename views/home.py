@@ -12,7 +12,8 @@ def home_embed():
         title="🗺️ 宝探し",
         description="宝の地図を手に入れて、冒険に出かけよう！\n\n"
         "👤 **1人でプレイ**\n難易度を選んで宝探しに出発します。\n\n"
-        "🤝 **パーティーを組む**\n同じVCの仲間とパーティーを作成・参加できます。",
+        "🤝 **パーティーを組む**\n同じVCの仲間とパーティーを作成・参加できます。\n\n"
+        "🏰 **ギルド作成/参加**\n最大6人のギルドに所属できます。加入後は原則脱退できません。",
         color=discord.Color.gold(),
     )
 
@@ -64,3 +65,15 @@ class HomeView(BaseView):
 
         await self.acknowledge(interaction)
         await show_party_screen(interaction)
+
+    @discord.ui.button(
+        label="ギルド作成/参加",
+        emoji="🏰",
+        style=discord.ButtonStyle.secondary,
+        custom_id="takara_home_guild",
+    )
+    async def game_guild(self, interaction, button):
+        from views.guild import show_guild_screen
+
+        await self.acknowledge(interaction)
+        await show_guild_screen(interaction)

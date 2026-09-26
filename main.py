@@ -6,6 +6,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from commands.guild import GuildEvents
 from commands.party import PartyEvents
 from commands.ranking import RankingCommands
 from commands.treasure import TreasureCommands
@@ -42,6 +43,7 @@ class TreasureBot(commands.Bot):
         SettingsService.validate_settings(await SettingsService.get_all())
         await self.add_cog(TreasureCommands())
         await self.add_cog(PartyEvents(self))
+        await self.add_cog(GuildEvents(self))
         await self.add_cog(RankingCommands(self, self.config.ranking_interval_seconds))
         self.add_view(TreasureView())
         self.add_view(HomeView())
@@ -62,6 +64,7 @@ class TreasureBot(commands.Bot):
         """BotとDB接続プールを終了する。"""
         try:
             await self.remove_cog("PartyEvents")
+            await self.remove_cog("GuildEvents")
             await self.remove_cog("RankingCommands")
             await super().close()
         finally:
